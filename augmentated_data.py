@@ -1,18 +1,4 @@
-# step3_augment.py
-# ─────────────────────────────────────────────────────────────────
-# Augments synthetic images to bulk up the dataset.
-# Two separate pipelines:
-#   - NOTO pipeline   → clean/print-style variation
-#   - RANJANA pipeline → heavier distortion, manuscript-like
-#
-# Run AFTER step2_generate_synthetic.py
-#
-# Output:
-#   dataset_raw/augmented_noto/
-#   dataset_raw/augmented_ranjana/
-#
-# Usage:  python step3_augment.py
-# ─────────────────────────────────────────────────────────────────
+
 
 import cv2
 import numpy as np

@@ -1,20 +1,3 @@
-# step6_build_final_dataset.py
-# ─────────────────────────────────────────────────────────────────
-# Combines ALL sources and builds the final train/val/test split.
-#
-# Sources combined (with priority weights):
-#   dataset_raw/augmented_noto/       weight 1.0
-#   dataset_raw/augmented_ranjana/    weight 1.5  (fewer but important)
-#   dataset_raw/handwritten_noto/     weight 2.0  (most valuable)
-#   dataset_raw/handwritten_ranjana/  weight 2.5  (manuscript-style)
-#   dataset_raw/manuscript_crops/     weight 3.0  (real manuscripts)
-#
-# Split: 80% train / 10% val / 10% test
-#
-# Output:  dataset_final/train/  val/  test/
-#
-# Usage:  python step6_build_final_dataset.py
-# ─────────────────────────────────────────────────────────────────
 
 import os, sys, shutil, random
 from tqdm import tqdm

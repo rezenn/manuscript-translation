@@ -2,7 +2,7 @@
 from PIL import Image, ImageDraw, ImageFont
 from newa_classes import NEWA_CHARACTERS
 
-# FONT_PATH = "fonts/ranjana.ttf"
+# FONT_PATH = "fonts/NotoSansNewa-Regular.ttf"
 FONT_PATH = "fonts/NithyaRanjanaNU-Regular.otf"
 
 # Layout settings
@@ -94,8 +94,8 @@ for i, (class_name, char) in enumerate(chars):
         )
 
 # Save
-sheet.save("character_sheet.pdf", "PDF",  resolution=150)
-print(f"Saved character_sheet.pdf")
+sheet.save("character_sheet_ranjana.pdf", "PDF",  resolution=150)
+print(f"Saved character_sheet_ranjana.pdf")
 print(f"Sheet size: {sheet_w} x {sheet_h} px")
 print(f"Total characters: {len(chars)}")
 print(f"Writing boxes per character: {WRITE_BOXES}")

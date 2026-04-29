@@ -1,21 +1,4 @@
-# step2_generate_synthetic.py
-# ─────────────────────────────────────────────────────────────────
-# Generates synthetic character images from:
-#   - Noto Sans Newa  (Unicode font  → use Unicode codepoints)
-#   - Ranjana         (Legacy font   → use keyboard key mappings)
-#
-# THE FIX for blank/tiny Ranjana images:
-#   Legacy fonts have unusual metrics. We auto-detect the actual
-#   rendered size and scale the font UP until the glyph fills
-#   the canvas properly — no more blank or tiny images.
-#
-# Output:
-#   dataset_raw/synthetic_noto/    ← from Noto Sans Newa
-#   dataset_raw/synthetic_ranjana/ ← from Ranjana (fixed)
-#
-# Usage:  python step2_generate_synthetic.py
-# ─────────────────────────────────────────────────────────────────
- 
+
 import os, sys
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
@@ -48,26 +31,6 @@ FONTS = {
         "sizes": NOTO_SIZES,
         "out":   "dataset_raw/synthetic_ranjana",
     },
-    # "nithya_ranjana": {
-    #     "path": "fonts/NithyaRanjanaNU-Regular.otf",
-    #     "type":  "unicode",
-    #     "sizes": NOTO_SIZES,
-    #     "out": "dataset_raw/synthetic_nithya",
-    # },
-    # "ranjana": {
-    #     "path":  "fonts/ranjana.ttf",
-    #     "type":  "legacy",
-    #     "sizes": RANJANA_SIZES,
-    #     "out":   "dataset_raw/synthetic_ranjana",
-    # },
-    # "prachalit1": {
-    #     "path":  "fonts/prachalit1.ttf",
-    #     "type":  "legacy",
-    #     "sizes": RANJANA_SIZES,
-    #     "out":   "dataset_raw/synthetic_prachalit1",
-    # },
-
-
 }
  
  
