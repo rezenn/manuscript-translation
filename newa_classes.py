@@ -324,41 +324,6 @@ NEWA_CHARACTERS = {
 
 CHAR_TO_CLASS = {v: k for k, v in NEWA_CHARACTERS.items()}
 
-
-# ══════════════════════════════════════════════════════════════════
-# RANJANA KEY MAP — verified from Images 1 & 2
-# ══════════════════════════════════════════════════════════════════
-# Reading Image 1 (ranjana full map) row by row:
-#
-# Row 1 (lowercase a-l):
-#   a=vowel_A  b=bha    c=cha    d=da     e=vowel_E  f=virama
-#   g=ga       h=ha     i=vowel_I j=jha   k=ka       l=la
-#
-# Row 2 (lowercase m-x):
-#   m=ma(1stroke) n=na   o=vowel_O  p=pa   q=UNUSED(ttha)
-#   r=ra       s=sa     t=ta     u=vowel_U  V=matra_uu  w=wa  x=matra_o
-#
-# Row 3 (y,z, uppercase A-J):
-#   y=ya       z=sha    A=vowel_AA  B=bha(alt)  C=cha(alt)
-#   D=da(alt)  E=vowel_E(alt)  F=matra_aa  G=ga(alt)?  H=visarga
-#   I=vowel_II  J=jha(alt)
-#
-# Row 4 (K-V):
-#   K=ka(alt)  L=UNUSED(candrabindu)  M=matra_e  N=nna
-#   O=vowel_O(alt)  P=pha    Q=UNUSED(ddha)  R=UNUSED(tha)
-#   S=ssa      T=tta    U=vowel_UU  V=matra_uu
-#
-# Row 5 (W-Z, 0-7):
-#   W=UNUSED(dha)  X=matra_au  Y=UNUSED(avagraha)  Z=sha(alt)
-#   0=digit_0  1=digit_1  2=digit_2  3=digit_3
-#   4=digit_4  5=digit_5  6=digit_6  7=digit_7
-#
-# Remaining: 8=digit_8  9=digit_9
-# Signs row: &=anusvara  ]=matra_i  ;=matra_ii  v=matra_u
-#
-
-
-
 RANJANA_KEY_MAP = {
     # ── Vowels ────────────────────────────────────────────────────
     'a': 'vowel_A',    'A': 'vowel_AA',
@@ -387,7 +352,7 @@ RANJANA_KEY_MAP = {
     'r': 'ra',
     'l': 'la',
     'w': 'wa',
-    'z': 'sha',  'Z': 'sha',    # Z also renders sha in Ranjana
+    'z': 'sha',  'Z': 'sha',   
     'S': 'ssa',
     's': 'sa',
     'h': 'ha',

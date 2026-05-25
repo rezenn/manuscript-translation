@@ -1,5 +1,14 @@
 # create_character_sheet.py
+import sys,os
+
 from PIL import Image, ImageDraw, ImageFont
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from utils import setup_utf8
+setup_utf8()
+
+sys.path.insert(0, os.path.dirname(__file__))
 from newa_classes import NEWA_CHARACTERS
 
 # FONT_PATH = "fonts/NotoSansNewa-Regular.ttf"

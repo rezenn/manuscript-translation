@@ -2,6 +2,8 @@
 import os, sys
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from utils import setup_utf8
 setup_utf8()
 
@@ -16,7 +18,7 @@ MIN_FILL_FRAC   = 0.25   # glyph must fill at least 25% of canvas
 TARGET_FILL     = 0.65   # aim for glyph to fill ~65% of canvas
  
 NOTO_SIZES      = [36, 40, 44, 48, 52, 56, 60]   # 7 images/class
-RANJANA_SIZES   = [40, 48, 56, 64, 72, 80, 88]   # start bigger for legacy
+RANJANA_SIZES   = [36, 40, 48, 56, 64, 72, 80, 88]   # start bigger for legacy
  
 FONTS = {
     "noto_sans": {
@@ -28,7 +30,7 @@ FONTS = {
     "Ranjana": {
         "path": "fonts/NithyaRanjanaNU-Regular.otf",
         "type":  "unicode",
-        "sizes": NOTO_SIZES,
+        "sizes": RANJANA_SIZES,
         "out":   "dataset_raw/synthetic_ranjana",
     },
 }
@@ -129,7 +131,7 @@ def is_blank(img, threshold=250, min_dark_pixels=10):
 # Main generator
 # ─────────────────────────────────────────────────────────────────
  
-def generate_unicode_font(font_cfg, newa_characters):
+def generate_unicode_font(font_cfg, newa_characters, font_label):
     font_path = font_cfg["path"]
     out_base  = font_cfg["out"]
     sizes     = font_cfg["sizes"]
@@ -139,7 +141,7 @@ def generate_unicode_font(font_cfg, newa_characters):
  
     for class_name, char_unicode in tqdm(
             newa_characters.items(),
-            desc=f"Noto Unicode"):
+            desc=f"{font_label} Unicode"):
  
         class_dir = os.path.join(out_base, class_name)
         os.makedirs(class_dir, exist_ok=True)
@@ -150,14 +152,14 @@ def generate_unicode_font(font_cfg, newa_characters):
                 img  = render_char_centered(char_unicode, font)
                 if img and not is_blank(img):
                     img.save(os.path.join(class_dir,
-                             f"noto_{size}px.png"))
+                             f"{font_label}_{size}px.png"))
                     saved += 1
                 else:
                     skipped += 1
             except Exception:
                 skipped += 1
  
-    print(f"  Noto: saved={saved}  skipped={skipped}")
+    print(f"  {font_label}: saved={saved}  skipped={skipped}")
     return saved
  
  
@@ -237,7 +239,7 @@ if __name__ == "__main__":
             continue
  
         if font_cfg["type"] == "unicode":
-            n = generate_unicode_font(font_cfg, NEWA_CHARACTERS)
+            n = generate_unicode_font(font_cfg, NEWA_CHARACTERS, font_id)
         else:
             n = generate_legacy_font(
                 font_cfg, NEWA_CHARACTERS,

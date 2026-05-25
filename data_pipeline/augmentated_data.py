@@ -1,10 +1,12 @@
 
-
 import cv2
 import numpy as np
 import os
 import sys
 from tqdm import tqdm
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from utils import setup_utf8
 setup_utf8()
 
@@ -19,14 +21,7 @@ JOBS = [
     ("dataset_raw/synthetic_ranjana",
      "dataset_raw/augmented_ranjana",
      "ranjana", 80),
-
-    # ("dataset_raw/synthetic_ranjana",
-    #  "dataset_raw/augmented_ranjana",
-    #  "ranjana", 70),   
-     
-    # ("dataset_raw/synthetic_prachalit1",
-    #  "dataset_raw/augmented_prachalit1",
-    #  "ranjana", 70),   
+  
 ]
 
 

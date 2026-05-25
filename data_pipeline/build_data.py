@@ -2,6 +2,9 @@
 import os, sys, shutil, random
 from tqdm import tqdm
 from collections import defaultdict
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from utils import setup_utf8
 setup_utf8()
 
@@ -11,12 +14,10 @@ from newa_classes import NEWA_CHARACTERS
 # ── Sources (add/remove as you collect data) ──────────────────────
 SOURCES = [
     # (directory,                            weight)
-    ("dataset_raw/augmented_noto",           1.0),
-    ("dataset_raw/augmented_ranjana",        1.5),
-    ("dataset_raw/augmented_prachalit1",     1.5),
-    ("dataset_raw/handwritten_noto",         2.0),
-    ("dataset_raw/handwritten_ranjana",      2.5),
-    ("dataset_raw/manuscript_crops",         3.0),
+    ("dataset_raw/augmented_noto",           1.5),
+    ("dataset_raw/augmented_ranjana",        2.0),
+    ("dataset_raw/augmented_handwritten_dataset",      3.0),
+    ("dataset_raw/augmented_manuscript",         4.0),
 ]
 
 OUTPUT  = "dataset_final"

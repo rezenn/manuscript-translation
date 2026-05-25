@@ -1,7 +1,11 @@
 # verify_dataset.py
 import os
+import sys
 import matplotlib.pyplot as plt
 import cv2
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
 from newa_classes import NEWA_CHARACTERS
 
 dataset_dir = "dataset_final/train"

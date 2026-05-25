@@ -1,0 +1,1061 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Newa OCR Toolkit · Manuscript Cropper</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700&family=Crimson+Pro:ital,wght@0,300;0,400;1,300&display=swap");
+
+      :root {
+        --ink: #1a0a00;
+        --parchment: #f5e6c8;
+        --parchment-dark: #e8d5a3;
+        --red-border: #c0392b;
+        --gold: #b8860b;
+        --gold-light: #d4a017;
+        --cream: #fdf6e3;
+        --shadow: rgba(26, 10, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      body {
+        background: var(--ink);
+        font-family: "Crimson Pro", Georgia, serif;
+        color: var(--parchment);
+        min-height: 100vh;
+        overflow-x: hidden;
+      }
+
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        z-index: 0;
+        pointer-events: none;
+        background-image:
+          repeating-linear-gradient(
+            0deg,
+            transparent,
+            transparent 28px,
+            rgba(184, 134, 11, 0.04) 28px,
+            rgba(184, 134, 11, 0.04) 29px
+          ),
+          repeating-linear-gradient(
+            90deg,
+            transparent,
+            transparent 28px,
+            rgba(184, 134, 11, 0.03) 28px,
+            rgba(184, 134, 11, 0.03) 29px
+          );
+      }
+
+      .app {
+        position: relative;
+        z-index: 1;
+      }
+
+      header {
+        text-align: center;
+        padding: 20px 16px 12px;
+        border-bottom: 2px solid var(--gold);
+        background: linear-gradient(180deg, #2a1200 0%, #1a0a00 100%);
+      }
+      header h1 {
+        font-family: "Cinzel Decorative", serif;
+        font-size: clamp(15px, 4vw, 22px);
+        color: var(--gold-light);
+        letter-spacing: 2px;
+      }
+      header p {
+        font-size: 13px;
+        color: var(--parchment-dark);
+        margin-top: 6px;
+        font-style: italic;
+      }
+
+      .tabs {
+        display: flex;
+        border-bottom: 2px solid var(--gold);
+        background: #120600;
+      }
+      .tab {
+        flex: 1;
+        padding: 12px 8px;
+        text-align: center;
+        cursor: pointer;
+        font-family: "Cinzel Decorative", serif;
+        font-size: clamp(9px, 2.5vw, 13px);
+        color: #9a7a4a;
+        background: none;
+        border: none;
+        border-bottom: 3px solid transparent;
+        transition: all 0.2s;
+      }
+      .tab.active {
+        color: var(--gold-light);
+        border-bottom-color: var(--gold-light);
+        background: rgba(212, 160, 23, 0.08);
+      }
+
+      .panel {
+        display: none;
+        padding: 16px;
+      }
+      .panel.active {
+        display: block;
+      }
+
+      .section-title {
+        font-family: "Cinzel Decorative", serif;
+        font-size: 11px;
+        color: var(--gold);
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        margin-bottom: 12px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid rgba(184, 134, 11, 0.3);
+      }
+
+      .card {
+        background: rgba(245, 230, 200, 0.06);
+        border: 1px solid rgba(184, 134, 11, 0.25);
+        border-radius: 6px;
+        padding: 14px;
+        margin-bottom: 14px;
+      }
+
+      .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 10px 18px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-family: "Crimson Pro", serif;
+        font-size: 15px;
+        transition: all 0.2s;
+      }
+      .btn-primary {
+        background: linear-gradient(135deg, var(--gold), #8b6914);
+        color: var(--ink);
+        font-weight: 600;
+        width: 100%;
+        justify-content: center;
+        box-shadow: 0 2px 12px rgba(184, 134, 11, 0.3);
+      }
+      .btn-secondary {
+        background: rgba(245, 230, 200, 0.1);
+        color: var(--parchment);
+        border: 1px solid rgba(184, 134, 11, 0.4);
+      }
+      .btn-sm {
+        padding: 6px 12px;
+        font-size: 13px;
+      }
+      .btn-danger {
+        background: rgba(192, 57, 43, 0.2);
+        color: #e74c3c;
+        border: 1px solid rgba(192, 57, 43, 0.4);
+      }
+
+      .file-drop {
+        border: 2px dashed rgba(184, 134, 11, 0.4);
+        border-radius: 8px;
+        padding: 28px 16px;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.2s;
+        position: relative;
+      }
+      .file-drop:hover,
+      .file-drop.drag-over {
+        border-color: var(--gold-light);
+        background: rgba(212, 160, 23, 0.06);
+      }
+      .file-drop input {
+        position: absolute;
+        inset: 0;
+        opacity: 0;
+        cursor: pointer;
+        width: 100%;
+        height: 100%;
+      }
+      .drop-icon {
+        font-size: 32px;
+        margin-bottom: 8px;
+      }
+
+      .stats-bar {
+        display: flex;
+        gap: 16px;
+        background: rgba(212, 160, 23, 0.06);
+        border: 1px solid rgba(184, 134, 11, 0.2);
+        border-radius: 6px;
+        padding: 10px 14px;
+        margin-bottom: 16px;
+      }
+      .stat {
+        text-align: center;
+        flex: 1;
+      }
+      .stat-val {
+        font-size: 22px;
+        font-weight: 300;
+        color: var(--gold-light);
+      }
+      .stat-lbl {
+        font-size: 10px;
+        color: #9a7a4a;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+
+      /* manuscript viewer - no zoom feature, but scrollable canvas */
+      .ms-viewer {
+        position: relative;
+        width: 100%;
+        overflow: auto;
+        background: #0a0500;
+        border-radius: 8px;
+        border: 1px solid rgba(184, 134, 11, 0.4);
+        margin-bottom: 12px;
+        max-height: 60vh;
+      }
+      #manuscript-wrapper {
+        position: relative;
+        display: inline-block;
+        cursor: crosshair;
+        user-select: none;
+        touch-action: none;
+      }
+      #manuscript-img {
+        display: block;
+        max-width: none;
+        width: auto;
+        height: auto;
+      }
+      #selection-box {
+        position: absolute;
+        border: 2px solid var(--gold-light);
+        background: rgba(212, 160, 23, 0.2);
+        pointer-events: none;
+        display: none;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+      }
+      .existing-crop {
+        position: absolute;
+        border: 1.5px solid rgba(192, 57, 43, 0.8);
+        background: rgba(192, 57, 43, 0.12);
+        pointer-events: none;
+      }
+
+      .label-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        margin-bottom: 12px;
+        flex-wrap: wrap;
+      }
+      .label-row label {
+        font-size: 13px;
+        color: var(--parchment-dark);
+        white-space: nowrap;
+      }
+      .label-row input {
+        flex: 2;
+        background: rgba(245, 230, 200, 0.08);
+        border: 1px solid rgba(184, 134, 11, 0.4);
+        border-radius: 4px;
+        color: var(--parchment);
+        font-size: 15px;
+        padding: 6px 10px;
+      }
+      .label-row select {
+        flex: 1;
+        background: #1a0a00;
+        border: 1px solid rgba(184, 134, 11, 0.4);
+        border-radius: 4px;
+        color: var(--parchment);
+        font-size: 13px;
+        padding: 6px 8px;
+      }
+
+      .controls-row {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+        margin-bottom: 10px;
+      }
+      .controls-row .btn {
+        flex: 1;
+        min-width: 80px;
+      }
+
+      #crop-preview-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(75px, 1fr));
+        gap: 8px;
+        max-height: 280px;
+        overflow-y: auto;
+        margin-top: 8px;
+      }
+      .crop-item {
+        background: rgba(245, 230, 200, 0.05);
+        border: 1px solid rgba(184, 134, 11, 0.25);
+        border-radius: 4px;
+        padding: 6px;
+        text-align: center;
+        position: relative;
+      }
+      .crop-item img {
+        width: 100%;
+        aspect-ratio: 1 / 1;
+        object-fit: contain;
+        background: #f5e6c8;
+        border-radius: 2px;
+      }
+      .crop-item input {
+        width: 100%;
+        margin-top: 4px;
+        background: rgba(245, 230, 200, 0.1);
+        border: 1px solid rgba(184, 134, 11, 0.3);
+        border-radius: 3px;
+        color: var(--parchment);
+        font-size: 10px;
+        padding: 2px 4px;
+        text-align: center;
+      }
+      .del-btn {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        background: rgba(192, 57, 43, 0.8);
+        border: none;
+        border-radius: 50%;
+        width: 18px;
+        height: 18px;
+        color: white;
+        font-size: 10px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .empty-state {
+        text-align: center;
+        padding: 32px 16px;
+        color: #6a5a3a;
+        font-style: italic;
+        font-size: 14px;
+      }
+
+      #toast {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(26, 10, 0, 0.95);
+        border: 1px solid var(--gold);
+        color: var(--parchment);
+        padding: 10px 20px;
+        border-radius: 20px;
+        font-size: 13px;
+        z-index: 999;
+        opacity: 0;
+        transition: opacity 0.3s;
+        pointer-events: none;
+        white-space: nowrap;
+      }
+      #toast.show {
+        opacity: 1;
+      }
+
+      .tips-list {
+        list-style: none;
+      }
+      .tips-list li {
+        padding: 6px 0;
+        font-size: 14px;
+        color: var(--parchment-dark);
+        border-bottom: 1px solid rgba(184, 134, 11, 0.12);
+        padding-left: 20px;
+        position: relative;
+      }
+      .tips-list li::before {
+        content: "◆";
+        position: absolute;
+        left: 0;
+        color: var(--gold);
+        font-size: 8px;
+        top: 9px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <header>
+        <h1>📜 Newa OCR Toolkit</h1>
+        <p>Manuscript Character Cropper · Dataset Builder</p>
+      </header>
+
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('extractor')">
+          ✂️ MS Extractor
+        </button>
+        <button class="tab" onclick="switchTab('aligner')">
+          📷 Sheet Aligner
+        </button>
+        <button class="tab" onclick="switchTab('pipeline')">🔧 Pipeline</button>
+      </div>
+
+      <!-- EXTRACTOR TAB (default, no zoom) -->
+      <div id="tab-extractor" class="panel active">
+        <div class="card">
+          <div class="section-title">Load Manuscript Image</div>
+          <div class="file-drop" id="ms-drop">
+            <input
+              type="file"
+              accept="image/*"
+              onchange="loadManuscriptFile(this)"
+            />
+            <div class="drop-icon">📜</div>
+            <p>Tap to load manuscript or character sheet</p>
+            <small
+              >Drag a precise rectangle around each character → crops are
+              pixel-perfect</small
+            >
+          </div>
+        </div>
+
+        <div id="extractor-workspace" style="display: none">
+          <div class="stats-bar">
+            <div class="stat">
+              <div class="stat-val" id="stat-crops">0</div>
+              <div class="stat-lbl">Crops</div>
+            </div>
+            <div class="stat">
+              <div class="stat-val" id="stat-labeled">0</div>
+              <div class="stat-lbl">Labeled</div>
+            </div>
+            <div class="stat">
+              <div class="stat-val" id="stat-classes">0</div>
+              <div class="stat-lbl">Classes</div>
+            </div>
+          </div>
+
+          <div class="label-row">
+            <label>🏷️ Label:</label>
+            <input
+              type="text"
+              id="label-input"
+              placeholder="Newa / Devanagari (e.g. ka, kha, etc)"
+              value="unlabeled"
+            />
+            <select id="class-select">
+              <option value="">-- quick pick --</option>
+            </select>
+          </div>
+
+          <div class="ms-viewer" id="ms-viewer">
+            <div id="manuscript-wrapper">
+              <img id="manuscript-img" draggable="false" />
+              <div id="selection-box"></div>
+            </div>
+          </div>
+
+          <div class="controls-row">
+            <button class="btn btn-secondary btn-sm" onclick="undoLastCrop()">
+              ↩ Undo
+            </button>
+            <button class="btn btn-secondary btn-sm" onclick="clearAllCrops()">
+              🗑 Clear All
+            </button>
+            <button class="btn btn-primary" onclick="downloadDataset()">
+              ⬇ Download ZIP (PNG + JSON)
+            </button>
+          </div>
+
+          <div class="section-title" style="margin-top: 8px">
+            ✂️ Cropped Characters
+          </div>
+          <div id="crop-preview-grid">
+            <div class="empty-state">Draw a rectangle on the image above</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ALIGNER TAB (kept from original, minimal) -->
+      <div id="tab-aligner" class="panel">
+        <div class="card">
+          <div class="section-title">Camera Alignment (Legacy)</div>
+          <p>
+            Use the extractor for manuscript crops. This tab kept for sheet
+            photography.
+          </p>
+        </div>
+      </div>
+      <!-- PIPELINE GUIDE TAB -->
+      <div id="tab-pipeline" class="panel">
+        <div class="card">
+          <div class="section-title">Workflow</div>
+          <p>
+            Step-by-step pipeline: print character sheet → align & capture →
+            auto-segment → extract crops → train.
+          </p>
+          <ul class="tips-list">
+            <li>Use Extractor: draw precise rectangle around each character</li>
+            <li>Crop matches exactly what you selected (no offset)</li>
+            <li>Label each crop and download ZIP</li>
+            <li>No automatic zoom — original resolution preserved</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+    <div id="toast"></div>
+    <canvas id="work-canvas" style="display: none"></canvas>
+
+    <script>
+      // ======================== GLOBALS ========================
+      let crops = []; // { dataURL, label, origX, origY, origW, origH, naturalW, naturalH }
+      let isDragging = false;
+      let dragStart = null;
+      let dragCurrent = null;
+      let touchId = null;
+      let currentImgElement = null;
+      let originalImgNaturalWidth = 1,
+        originalImgNaturalHeight = 1;
+
+      // Newa classes (subset, can be extended)
+      const NEWA_CLASSES = [
+        "ka",
+        "kha",
+        "ga",
+        "gha",
+        "nga",
+        "ca",
+        "cha",
+        "ja",
+        "jha",
+        "nya",
+        "ta",
+        "tha",
+        "da",
+        "dha",
+        "na",
+        "pa",
+        "pha",
+        "ba",
+        "bha",
+        "ma",
+        "ya",
+        "ra",
+        "la",
+        "va",
+        "sha",
+        "ssa",
+        "sa",
+        "ha",
+        "ksha",
+        "jnya",
+        "a",
+        "aa",
+        "i",
+        "ii",
+        "u",
+        "uu",
+        "e",
+        "ai",
+        "o",
+        "au",
+        "am",
+        "ah",
+        "virama",
+        "anusvara",
+        "visarga",
+        "danda",
+        "double_danda",
+        "num_0",
+        "num_1",
+        "num_2",
+        "num_3",
+        "num_4",
+        "num_5",
+        "num_6",
+        "num_7",
+        "num_8",
+        "num_9",
+      ];
+
+      const classSelect = document.getElementById("class-select");
+      NEWA_CLASSES.forEach((cls) => {
+        let opt = document.createElement("option");
+        opt.value = cls;
+        opt.textContent = cls;
+        classSelect.appendChild(opt);
+      });
+      classSelect.addEventListener("change", () => {
+        if (classSelect.value)
+          document.getElementById("label-input").value = classSelect.value;
+      });
+
+      // toast helper
+      let toastTimer;
+      function toast(msg) {
+        const el = document.getElementById("toast");
+        el.textContent = msg;
+        el.classList.add("show");
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => el.classList.remove("show"), 2500);
+      }
+
+      function switchTab(name) {
+        document.querySelectorAll(".tab").forEach((t, idx) => {
+          const tabIds = ["extractor", "aligner", "pipeline"];
+          t.classList.toggle("active", tabIds[idx] === name);
+        });
+        document
+          .querySelectorAll(".panel")
+          .forEach((p) => p.classList.remove("active"));
+        document.getElementById(`tab-${name}`).classList.add("active");
+      }
+
+      // ======================== MANUSCRIPT LOADING (NO ZOOM, PRESERVE ORIGINAL RESOLUTION) ========================
+      function loadManuscriptFile(input) {
+        if (!input.files || !input.files[0]) return;
+        const reader = new FileReader();
+        reader.onload = (e) => loadManuscriptFromURL(e.target.result);
+        reader.readAsDataURL(input.files[0]);
+      }
+
+      function loadManuscriptFromURL(url) {
+        const img = document.getElementById("manuscript-img");
+        img.onload = () => {
+          // Store original natural dimensions (actual image pixels)
+          originalImgNaturalWidth = img.naturalWidth;
+          originalImgNaturalHeight = img.naturalHeight;
+
+          // Reset any crops (new image)
+          crops = [];
+          renderCropGrid();
+          clearExistingBoxes();
+          updateStats();
+
+          // Make wrapper display image at its intrinsic size (no scaling, no zoom)
+          // The wrapper will be scrollable inside .ms-viewer
+          img.style.width = originalImgNaturalWidth + "px";
+          img.style.height = originalImgNaturalHeight + "px";
+          img.style.maxWidth = "none";
+
+          // Hide the file drop and show workspace
+          document.getElementById("ms-drop").style.display = "none";
+          document.getElementById("extractor-workspace").style.display =
+            "block";
+
+          // Reattach drag events after image loads
+          setupDragEvents();
+          toast(
+            "Manuscript loaded — draw rectangles directly on the original image (no zoom, accurate crops)",
+          );
+        };
+        img.src = url;
+      }
+
+      // ======================== PURE SELECTION & CROP (ACCURATE PIXEL COORDINATES) ========================
+      function setupDragEvents() {
+        const wrapper = document.getElementById("manuscript-wrapper");
+        // Remove old listeners to avoid duplicates
+        wrapper.removeEventListener("mousedown", onMouseDown);
+        wrapper.removeEventListener("mousemove", onMouseMove);
+        wrapper.removeEventListener("mouseup", onMouseUp);
+        wrapper.removeEventListener("touchstart", onTouchStart);
+        wrapper.removeEventListener("touchmove", onTouchMove);
+        wrapper.removeEventListener("touchend", onTouchEnd);
+
+        wrapper.addEventListener("mousedown", onMouseDown);
+        wrapper.addEventListener("mousemove", onMouseMove);
+        wrapper.addEventListener("mouseup", onMouseUp);
+        wrapper.addEventListener("touchstart", onTouchStart, {
+          passive: false,
+        });
+        wrapper.addEventListener("touchmove", onTouchMove, { passive: false });
+        wrapper.addEventListener("touchend", onTouchEnd);
+      }
+
+      // Get coordinates relative to the raw image pixels (not scaled, because img is displayed 1:1)
+      function getEventCoords(e, wrapper) {
+        const rect = wrapper.getBoundingClientRect();
+        let clientX, clientY;
+        if (e.touches) {
+          const touch = e.touches[0];
+          clientX = touch.clientX;
+          clientY = touch.clientY;
+        } else {
+          clientX = e.clientX;
+          clientY = e.clientY;
+        }
+        // Since the image is displayed at exact natural size, wrapper's content size = image natural size.
+        // but we must compute the relative position within the wrapper.
+        let x = clientX - rect.left;
+        let y = clientY - rect.top;
+        // clamp to image bounds (0 .. natural width/height)
+        x = Math.max(0, Math.min(x, originalImgNaturalWidth));
+        y = Math.max(0, Math.min(y, originalImgNaturalHeight));
+        return { x, y };
+      }
+
+      function onMouseDown(e) {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        const wrapper = document.getElementById("manuscript-wrapper");
+        dragStart = getEventCoords(e, wrapper);
+        isDragging = true;
+        dragCurrent = { ...dragStart };
+        updateSelectionBox();
+      }
+
+      function onMouseMove(e) {
+        if (!isDragging) return;
+        e.preventDefault();
+        const wrapper = document.getElementById("manuscript-wrapper");
+        dragCurrent = getEventCoords(e, wrapper);
+        updateSelectionBox();
+      }
+
+      function onMouseUp(e) {
+        if (!isDragging) return;
+        e.preventDefault();
+        isDragging = false;
+        commitCropFromDrag();
+      }
+
+      function onTouchStart(e) {
+        e.preventDefault();
+        const wrapper = document.getElementById("manuscript-wrapper");
+        const touch = e.touches[0];
+        touchId = touch.identifier;
+        dragStart = getEventCoords(e, wrapper);
+        isDragging = true;
+        dragCurrent = { ...dragStart };
+        updateSelectionBox();
+      }
+
+      function onTouchMove(e) {
+        if (!isDragging) return;
+        e.preventDefault();
+        const wrapper = document.getElementById("manuscript-wrapper");
+        dragCurrent = getEventCoords(e, wrapper);
+        updateSelectionBox();
+      }
+
+      function onTouchEnd(e) {
+        if (!isDragging) return;
+        e.preventDefault();
+        isDragging = false;
+        commitCropFromDrag();
+        touchId = null;
+      }
+
+      function updateSelectionBox() {
+        const box = document.getElementById("selection-box");
+        if (!dragStart || !dragCurrent) {
+          box.style.display = "none";
+          return;
+        }
+        const x1 = Math.min(dragStart.x, dragCurrent.x);
+        const y1 = Math.min(dragStart.y, dragCurrent.y);
+        const x2 = Math.max(dragStart.x, dragCurrent.x);
+        const y2 = Math.max(dragStart.y, dragCurrent.y);
+        const width = x2 - x1;
+        const height = y2 - y1;
+        if (width < 5 || height < 5) {
+          box.style.display = "none";
+          return;
+        }
+        box.style.display = "block";
+        // The wrapper's coordinate system is exactly 1:1 with image pixels.
+        box.style.left = x1 + "px";
+        box.style.top = y1 + "px";
+        box.style.width = width + "px";
+        box.style.height = height + "px";
+      }
+
+      function commitCropFromDrag() {
+        const box = document.getElementById("selection-box");
+        box.style.display = "none";
+        if (!dragStart || !dragCurrent) return;
+
+        let x1 = Math.min(dragStart.x, dragCurrent.x);
+        let y1 = Math.min(dragStart.y, dragCurrent.y);
+        let x2 = Math.max(dragStart.x, dragCurrent.x);
+        let y2 = Math.max(dragStart.y, dragCurrent.y);
+        let w = x2 - x1;
+        let h = y2 - y1;
+
+        if (w < 8 || h < 8) {
+          toast(
+            "Selection too small, draw a larger rectangle around the character",
+          );
+          dragStart = null;
+          dragCurrent = null;
+          return;
+        }
+
+        // Clamp to image bounds
+        x1 = Math.max(0, Math.min(x1, originalImgNaturalWidth));
+        y1 = Math.max(0, Math.min(y1, originalImgNaturalHeight));
+        x2 = Math.max(0, Math.min(x2, originalImgNaturalWidth));
+        y2 = Math.max(0, Math.min(y2, originalImgNaturalHeight));
+        w = x2 - x1;
+        h = y2 - y1;
+        if (w <= 0 || h <= 0) return;
+
+        // Get the original image element (full resolution)
+        const imgElement = document.getElementById("manuscript-img");
+        const canvas = document.getElementById("work-canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        // Draw the exact area from the source image (which is at full resolution)
+        ctx.drawImage(imgElement, x1, y1, w, h, 0, 0, w, h);
+        const dataURL = canvas.toDataURL("image/png");
+        let label = document.getElementById("label-input").value.trim();
+        if (label === "") label = "unlabeled";
+
+        crops.push({
+          dataURL: dataURL,
+          label: label,
+          origX: Math.floor(x1),
+          origY: Math.floor(y1),
+          origW: Math.floor(w),
+          origH: Math.floor(h),
+          naturalW: originalImgNaturalWidth,
+          naturalH: originalImgNaturalHeight,
+        });
+
+        renderCropGrid();
+        drawAllCropBoxes();
+        updateStats();
+        toast(`Cropped character (${w}×${h}) — label: ${label}`);
+
+        dragStart = null;
+        dragCurrent = null;
+      }
+
+      function drawAllCropBoxes() {
+        const wrapper = document.getElementById("manuscript-wrapper");
+        // remove previous existing-crop elements
+        document
+          .querySelectorAll(".existing-crop")
+          .forEach((el) => el.remove());
+        crops.forEach((crop) => {
+          const div = document.createElement("div");
+          div.className = "existing-crop";
+          // positions are already in original image pixel coordinates (since image is displayed 1:1)
+          div.style.left = crop.origX + "px";
+          div.style.top = crop.origY + "px";
+          div.style.width = crop.origW + "px";
+          div.style.height = crop.origH + "px";
+          wrapper.appendChild(div);
+        });
+      }
+
+      function clearExistingBoxes() {
+        document
+          .querySelectorAll(".existing-crop")
+          .forEach((el) => el.remove());
+      }
+
+      function renderCropGrid() {
+        const grid = document.getElementById("crop-preview-grid");
+        grid.innerHTML = "";
+        if (crops.length === 0) {
+          grid.innerHTML =
+            '<div class="empty-state">Draw a rectangle on the image above</div>';
+          return;
+        }
+        crops.forEach((crop, idx) => {
+          const item = document.createElement("div");
+          item.className = "crop-item";
+          item.innerHTML = `
+            <button class="del-btn" onclick="deleteCrop(${idx})">×</button>
+            <img src="${crop.dataURL}" alt="crop">
+            <input type="text" value="${escapeHtml(crop.label)}" onchange="updateCropLabel(${idx}, this.value)">
+          `;
+          grid.appendChild(item);
+        });
+      }
+
+      function escapeHtml(str) {
+        return str.replace(/[&<>]/g, function (m) {
+          if (m === "&") return "&amp;";
+          if (m === "<") return "&lt;";
+          if (m === ">") return "&gt;";
+          return m;
+        });
+      }
+
+      function updateCropLabel(idx, newLabel) {
+        if (crops[idx]) {
+          crops[idx].label = newLabel.trim() || "unlabeled";
+          updateStats();
+        }
+      }
+
+      function deleteCrop(idx) {
+        crops.splice(idx, 1);
+        renderCropGrid();
+        drawAllCropBoxes();
+        updateStats();
+        toast("Crop removed");
+      }
+
+      function undoLastCrop() {
+        if (crops.length === 0) return;
+        crops.pop();
+        renderCropGrid();
+        drawAllCropBoxes();
+        updateStats();
+        toast("Last crop undone");
+      }
+
+      function clearAllCrops() {
+        if (crops.length === 0) return;
+        if (!confirm("Delete ALL crops?")) return;
+        crops = [];
+        renderCropGrid();
+        drawAllCropBoxes();
+        updateStats();
+        toast("All crops cleared");
+      }
+
+      function updateStats() {
+        document.getElementById("stat-crops").textContent = crops.length;
+        const labeled = crops.filter(
+          (c) => c.label && c.label !== "unlabeled",
+        ).length;
+        document.getElementById("stat-labeled").textContent = labeled;
+        const uniqueClasses = new Set(
+          crops.map((c) => c.label).filter((l) => l && l !== "unlabeled"),
+        );
+        document.getElementById("stat-classes").textContent =
+          uniqueClasses.size;
+      }
+
+      // ======================== DOWNLOAD ZIP (Individual PNGs + Manifest) ========================
+      function dataURLtoBlob(dataURL) {
+        const arr = dataURL.split(",");
+        const mimeMatch = arr[0].match(/:(.*?);/);
+        const mime = mimeMatch ? mimeMatch[1] : "image/png";
+        const bstr = atob(arr[1]);
+        let n = bstr.length;
+        const u8arr = new Uint8Array(n);
+        while (n--) u8arr[n] = bstr.charCodeAt(n);
+        return new Blob([u8arr], { type: mime });
+      }
+
+      function downloadBlob(blob, filename) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 200);
+      }
+
+      function sanitizeFilename(label, idx) {
+        let clean = label.replace(
+          /[^a-zA-Z0-9_\u0900-\u097F\u11480-\u114CF]/g,
+          "_",
+        );
+        if (clean.length === 0) clean = "char";
+        return `${clean}_${idx}.png`;
+      }
+
+      async function downloadDataset() {
+        if (crops.length === 0) {
+          toast("No crops to export");
+          return;
+        }
+        toast("Preparing dataset... downloading multiple files");
+        // manifest with crop metadata
+        const manifest = crops.map((c, i) => ({
+          index: i,
+          filename: sanitizeFilename(c.label, i),
+          label: c.label,
+          bbox_pixels: {
+            x: c.origX,
+            y: c.origY,
+            width: c.origW,
+            height: c.origH,
+          },
+          image_dimensions: { width: c.naturalW, height: c.naturalH },
+        }));
+        const manifestBlob = new Blob([JSON.stringify(manifest, null, 2)], {
+          type: "application/json",
+        });
+        downloadBlob(manifestBlob, "manuscript_crops_manifest.json");
+
+        // Download images sequentially with small delay to avoid browser issues
+        for (let i = 0; i < crops.length; i++) {
+          const crop = crops[i];
+          const filename = sanitizeFilename(crop.label, i);
+          const blob = dataURLtoBlob(crop.dataURL);
+          downloadBlob(blob, filename);
+          await new Promise((r) => setTimeout(r, 120));
+        }
+        toast(`✓ Exported ${crops.length} character crops + metadata manifest`);
+      }
+
+      // ======================== ALIGNER stubs (lightweight) ========================
+      window.toggleCamera = () =>
+        toast(
+          "Camera aligner simplified: use Extractor tab for manuscript cropping",
+        );
+      window.captureSheet = () =>
+        toast("Switch to Extractor for character crops");
+      window.retakeCapture = () => {};
+      window.downloadCapture = () => {};
+      window.sendToExtractor = () => {};
+      window.stopCamera = () => {};
+      window.switchCameraFacing = () => {};
+
+      // Drag-drop zones for file
+      const msDrop = document.getElementById("ms-drop");
+      if (msDrop) {
+        msDrop.addEventListener("dragover", (e) => {
+          e.preventDefault();
+          msDrop.classList.add("drag-over");
+        });
+        msDrop.addEventListener("dragleave", () =>
+          msDrop.classList.remove("drag-over"),
+        );
+        msDrop.addEventListener("drop", (e) => {
+          e.preventDefault();
+          msDrop.classList.remove("drag-over");
+          const file = e.dataTransfer.files[0];
+          if (file && file.type.startsWith("image/")) {
+            const reader = new FileReader();
+            reader.onload = (ev) => loadManuscriptFromURL(ev.target.result);
+            reader.readAsDataURL(file);
+          } else toast("Please drop an image file");
+        });
+      }
+
+      // initial: ensure correct state
+      console.log("Manuscript cropper ready — true pixel crops, no zoom");
+    </script>
+  </body>
+</html>

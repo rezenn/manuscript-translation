@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <title>Newa Sheet Extractor — Precision Align</title>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Sora:wght@300;400;600;700&display=swap");
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --bg: #0b0c10;
+        --surface: #13141a;
+        --s2: #1a1c24;
+        --s3: #22242e;
+        --border: #252830;
+        --accent: #4fffb0;
+        --blue: #5b8fff;
+        --warn: #ffb84f;
+        --danger: #ff5060;
+        --text: #dde1ee;
+        --muted: #5c6070;
+        --row-highlight: rgba(79, 255, 176, 0.07);
+      }
+
+      body {
+        font-family: "Sora", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        height: 100vh;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      header {
+        height: 46px;
+        min-height: 46px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 0 20px;
+        border-bottom: 1px solid var(--border);
+        background: var(--surface);
+        flex-shrink: 0;
+      }
+
+      header h1 {
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        color: var(--accent);
+      }
+
+      .header-sep {
+        flex: 1;
+      }
+
+      .hdr-stat {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--muted);
+        padding: 3px 10px;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+      }
+
+      .hdr-stat span {
+        color: var(--accent);
+      }
+
+      .main {
+        display: grid;
+        grid-template-columns: 260px 1fr 300px;
+        flex: 1;
+        min-height: 0;
+      }
+
+      /* left panel */
+      .left-panel {
+        border-right: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+
+      .section {
+        border-bottom: 1px solid var(--border);
+        padding: 10px 14px;
+      }
+
+      .section-title {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 7px;
+      }
+
+      .row label {
+        font-size: 11px;
+        flex: 1;
+        white-space: nowrap;
+      }
+
+      .val {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--accent);
+        min-width: 32px;
+        text-align: right;
+      }
+
+      input[type="range"] {
+        -webkit-appearance: none;
+        width: 90px;
+        height: 2px;
+        background: var(--border);
+        border-radius: 1px;
+      }
+
+      input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 11px;
+        height: 11px;
+        border-radius: 50%;
+        background: var(--accent);
+        cursor: pointer;
+      }
+
+      .legend {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .leg-item {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 10px;
+      }
+
+      .leg-sw {
+        width: 14px;
+        height: 8px;
+        border-radius: 1px;
+      }
+
+      /* canvas area */
+      .canvas-wrap {
+        position: relative;
+        background: #07080b;
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      #uploadPrompt {
+        text-align: center;
+        color: var(--muted);
+      }
+
+      .btn-open {
+        background: var(--accent);
+        color: #000;
+        border: none;
+        padding: 8px 18px;
+        font-family: "Sora", sans-serif;
+        font-size: 12px;
+        font-weight: 700;
+        border-radius: 5px;
+        cursor: pointer;
+      }
+
+      #mainCanvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        cursor: crosshair;
+      }
+
+      .zoom-bar {
+        position: absolute;
+        bottom: 10px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: none;
+        align-items: center;
+        gap: 6px;
+        background: rgba(19, 20, 26, 0.92);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 10px;
+      }
+
+      .zoom-bar.visible {
+        display: flex;
+      }
+
+      .zb {
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--text);
+        width: 20px;
+        height: 20px;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+
+      .row-tooltip {
+        position: absolute;
+        top: 8px;
+        left: 8px;
+        background: rgba(19, 20, 26, 0.9);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 4px 9px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        color: var(--accent);
+        display: none;
+        pointer-events: none;
+      }
+
+      /* right panel */
+      .right-panel {
+        border-left: 1px solid var(--border);
+        background: var(--surface);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+
+      .right-panel-header {
+        padding: 10px 14px 8px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        justify-content: space-between;
+        flex-shrink: 0;
+      }
+
+      .right-panel-header h3 {
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--muted);
+      }
+
+      .btn-reset-all {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9px;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 2px 7px;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+
+      #rowList {
+        flex: 1;
+        overflow-y: auto;
+        padding: 6px 0;
+      }
+
+      .row-item {
+        padding: 7px 12px;
+        border-bottom: 1px solid rgba(37, 40, 48, 0.5);
+        cursor: pointer;
+        transition: background 0.1s;
+      }
+
+      .row-item:hover {
+        background: var(--row-highlight);
+      }
+
+      .row-item.active {
+        border-left: 2px solid var(--accent);
+        background: rgba(79, 255, 176, 0.05);
+      }
+
+      .row-item-header {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 6px;
+      }
+
+      .row-num {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        color: var(--accent);
+      }
+
+      .mini-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-bottom: 4px;
+      }
+
+      .mini-label {
+        font-size: 9px;
+        color: var(--muted);
+        width: 70px;
+      }
+
+      .mini-val {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9px;
+        min-width: 38px;
+        text-align: right;
+      }
+
+      input.mini {
+        width: 100px;
+        height: 2px;
+      }
+
+      .reset-row-btn {
+        font-size: 8px;
+        background: none;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        border-radius: 2px;
+        padding: 1px 5px;
+        cursor: pointer;
+      }
+
+      .actions {
+        padding: 10px 14px;
+        border-top: 1px solid var(--border);
+        flex-shrink: 0;
+      }
+
+      .btn-extract {
+        width: 100%;
+        padding: 10px;
+        background: var(--accent);
+        color: #000;
+        font-weight: 700;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        margin-bottom: 6px;
+      }
+
+      .status {
+        font-family: "JetBrains Mono", monospace;
+        font-size: 10px;
+        text-align: center;
+        color: var(--muted);
+      }
+
+      .prog-bar {
+        height: 3px;
+        background: var(--border);
+        border-radius: 2px;
+        overflow: hidden;
+        margin-bottom: 8px;
+      }
+
+      .prog-fill {
+        height: 100%;
+        background: var(--accent);
+        width: 0;
+      }
+
+      textarea {
+        width: 100%;
+        background: var(--s2);
+        border: 1px solid var(--border);
+        color: var(--text);
+        font-family: "JetBrains Mono", monospace;
+        font-size: 9px;
+        padding: 6px;
+        border-radius: 4px;
+        resize: vertical;
+      }
+
+      #fileInput {
+        display: none;
+      }
+
+      ::-webkit-scrollbar {
+        width: 4px;
+      }
+    </style>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  </head>
+  <body>
+    <header>
+      <h1>⬡ NEWA SHEET EXTRACTOR | ROW+COLUMN ALIGN</h1>
+      <div class="header-sep"></div>
+      <div class="hdr-stat" id="hdrInfo">No image</div>
+      <div class="hdr-stat">Cells: <span id="hdrCells">—</span></div>
+      <div class="hdr-stat">Rows: <span id="hdrRows">—</span></div>
+    </header>
+
+    <div class="main">
+      <div class="left-panel">
+        <div class="section">
+          <button
+            class="btn-open"
+            style="width: 100%"
+            onclick="document.getElementById('fileInput').click()"
+          >
+            📂 Open Sheet Photo
+          </button>
+        </div>
+        <div class="section">
+          <div class="section-title">Layout</div>
+          <div class="row">
+            <label>Columns</label><span class="val" id="vCols">8</span
+            ><input
+              type="range"
+              id="sCols"
+              min="1"
+              max="14"
+              value="8"
+              step="1"
+            />
+          </div>
+          <div class="row">
+            <label>Write boxes/char</label><span class="val" id="vWbox">5</span
+            ><input
+              type="range"
+              id="sWbox"
+              min="1"
+              max="8"
+              value="5"
+              step="1"
+            />
+          </div>
+          <div class="row">
+            <label>Total chars</label><span class="val" id="vChars">82</span
+            ><input
+              type="range"
+              id="sChars"
+              min="10"
+              max="100"
+              value="82"
+              step="1"
+            />
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Page Margins (%)</div>
+          <div class="row">
+            <label>Left</label><span class="val" id="vLeft">2</span
+            ><input
+              type="range"
+              id="sLeft"
+              min="0"
+              max="20"
+              value="2"
+              step="0.5"
+            />
+          </div>
+          <div class="row">
+            <label>Top</label><span class="val" id="vTop">7</span
+            ><input
+              type="range"
+              id="sTop"
+              min="0"
+              max="25"
+              value="7"
+              step="0.5"
+            />
+          </div>
+          <div class="row">
+            <label>Right</label><span class="val" id="vRight">2</span
+            ><input
+              type="range"
+              id="sRight"
+              min="0"
+              max="20"
+              value="2"
+              step="0.5"
+            />
+          </div>
+          <div class="row">
+            <label>Bottom</label><span class="val" id="vBot">2</span
+            ><input
+              type="range"
+              id="sBot"
+              min="0"
+              max="20"
+              value="2"
+              step="0.5"
+            />
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Cell geometry</div>
+          <div class="row">
+            <label>Ref box width %</label><span class="val" id="vRef">28</span
+            ><input
+              type="range"
+              id="sRef"
+              min="5"
+              max="55"
+              value="28"
+              step="0.5"
+            />
+          </div>
+          <div class="row">
+            <label>Cell height %</label><span class="val" id="vH">68</span
+            ><input
+              type="range"
+              id="sH"
+              min="20"
+              max="98"
+              value="68"
+              step="1"
+            />
+          </div>
+          <div class="row">
+            <label>Cell top pad %</label><span class="val" id="vPad">4</span
+            ><input
+              type="range"
+              id="sPad"
+              min="0"
+              max="25"
+              value="4"
+              step="1"
+            />
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Legend</div>
+          <div class="legend">
+            <div class="leg-item">
+              <div
+                class="leg-sw"
+                style="background: #5b8fff44; border: 1px solid #5b8fff"
+              ></div>
+              Reference box
+            </div>
+            <div class="leg-item">
+              <div
+                class="leg-sw"
+                style="background: #4fffb044; border: 1px solid #4fffb0"
+              ></div>
+              Write cell (green)
+            </div>
+            <div class="leg-item">
+              <div
+                class="leg-sw"
+                style="background: #ff506044; border: 1px solid #ff5060"
+              ></div>
+              Out of bounds
+            </div>
+            <div class="leg-item">
+              <div
+                class="leg-sw"
+                style="background: #ffb84f44; border: 1px solid #ffb84f"
+              ></div>
+              Active row/col adjust
+            </div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">Class names (line per char)</div>
+          <textarea id="classNames" rows="6">
+vowel_A
+vowel_AA
+vowel_I
+vowel_II
+vowel_U
+vowel_UU
+vowel_E
+vowel_AI
+vowel_O
+vowel_AU
+ka
+kha
+ga
+gha
+nga
+ca
+cha
+ja
+jha
+nya
+tta
+tha
+dda
+ddha
+nna
+ta
+tha
+da
+dha
+na
+pa
+pha
+ba
+bha
+ma
+ya
+ra
+la
+wa
+sha
+ssa
+sa
+ha
+matra_aa
+matra_I
+matra_ii
+matra_u
+matra_uu
+matra_e
+matra_ai
+matra_o
+matra_au
+virama
+candrabindu
+anusvara
+visarga
+avagraha
+digit_0
+digit_1
+digit_2
+digit_3
+digit_4
+digit_5
+digit_6
+digit_7
+digit_8
+digit_9</textarea
+          >
+        </div>
+      </div>
+
+      <div class="canvas-wrap" id="canvasWrap">
+        <div id="uploadPrompt">
+          <div class="icon">📄</div>
+          <p>Open your character sheet</p>
+          <button
+            class="btn-open"
+            onclick="document.getElementById('fileInput').click()"
+          >
+            Open Image
+          </button>
+        </div>
+        <canvas id="mainCanvas"></canvas>
+        <div class="zoom-bar" id="zoomBar">
+          <button class="zb" onclick="zoom(-0.12)">−</button
+          ><span id="zoomLabel">100%</span
+          ><button class="zb" onclick="zoom(0.12)">+</button
+          ><button class="zb" onclick="resetZoom()">FIT</button>
+        </div>
+        <div class="row-tooltip" id="rowTooltip"></div>
+      </div>
+
+      <div class="right-panel">
+        <div class="right-panel-header">
+          <h3>PER-ROW & PER-COLUMN ADJUST</h3>
+          <button class="btn-reset-all" onclick="resetAllPerRowCol()">
+            Reset all
+          </button>
+        </div>
+        <div id="rowList" style="padding: 0">
+          <div style="padding: 20px; text-align: center; color: var(--muted)">
+            Load image → adjust each row (Y offset + Height) and each column (X
+            offset + Width)
+          </div>
+        </div>
+        <div class="actions">
+          <div class="prog-bar" id="progBar" style="display: none">
+            <div class="prog-fill" id="progFill"></div>
+          </div>
+          <div class="status" id="statusMsg">
+            Load image → align green boxes → extract ZIP
+          </div>
+          <button
+            class="btn-extract"
+            id="btnExtract"
+            disabled
+            onclick="extractAll()"
+          >
+            ⬇ Extract All Crops (ZIP)
+          </button>
+        </div>
+      </div>
+    </div>
+    <input type="file" id="fileInput" accept="image/*" />
+
+    <script>
+      // STATE
+      let img = null,
+        imgW = 0,
+        imgH = 0;
+      let scale = 1,
+        panX = 0,
+        panY = 0;
+      let isPanning = false,
+        lastPan = null;
+      let hoveredRow = -1;
+
+      // PER-ROW: yOffset (px image), heightScale (multiplier)
+      let rowYOffsets = []; // px displacement
+      let rowHeightScales = []; // 0.5..1.8
+
+      // PER-COLUMN: xOffset (px image), widthScale (multiplier for column width)
+      let colXOffsets = []; // px shift per column
+      let colWidthScales = []; // multiplier on base column width
+
+      const canvas = document.getElementById("mainCanvas");
+      const ctx = canvas.getContext("2d");
+      const g = (id) => document.getElementById(id);
+      const pf = (id) => parseFloat(g(id).value);
+
+      function getGlobal() {
+        return {
+          cols: parseInt(g("sCols").value),
+          wboxes: parseInt(g("sWbox").value),
+          nchars: parseInt(g("sChars").value),
+          leftP: pf("sLeft") / 100,
+          topP: pf("sTop") / 100,
+          rightP: pf("sRight") / 100,
+          botP: pf("sBot") / 100,
+          refFrac: pf("sRef") / 100,
+          hFrac: pf("sH") / 100,
+          padFrac: pf("sPad") / 100,
+        };
+      }
+
+      function numRows(pr) {
+        return Math.ceil(pr.nchars / pr.cols);
+      }
+
+      // LAYOUT with per-row and per-column custom transforms
+      function computeLayout(pr) {
+        if (!img) return null;
+        const W = imgW,
+          H = imgH;
+        const nRows = numRows(pr);
+        const x0 = pr.leftP * W;
+        const y0 = pr.topP * H;
+        const x1 = W - pr.rightP * W;
+        const y1 = H - pr.botP * H;
+        const baseColWidth = (x1 - x0) / pr.cols;
+        const baseRowH = (y1 - y0) / nRows;
+
+        // build row top positions with per-row height scaling
+        let rowTops = [];
+        let curY = y0;
+        for (let r = 0; r < nRows; r++) {
+          rowTops.push(curY);
+          const rh = baseRowH * (rowHeightScales[r] ?? 1.0);
+          curY += rh;
+        }
+
+        // per-column dynamic left offsets and widths
+        let colLefts = [];
+        let colWidths = [];
+        let curX = x0;
+        for (let c = 0; c < pr.cols; c++) {
+          let w = baseColWidth * (colWidthScales[c] ?? 1.0);
+          let xShift = colXOffsets[c] ?? 0;
+          colLefts.push(curX + xShift);
+          colWidths.push(w);
+          curX += baseColWidth; // original spacing accumulates baseline, shift is additional
+        }
+
+        const refW = baseColWidth * pr.refFrac;
+        const gap = Math.max(1, baseColWidth / 80);
+        const avail = baseColWidth - refW - 8;
+        const cellW = Math.max(4, (avail - gap * (pr.wboxes - 1)) / pr.wboxes);
+
+        let cells = [];
+        for (let i = 0; i < pr.nchars; i++) {
+          const col = i % pr.cols;
+          const row = Math.floor(i / pr.cols);
+          const baseX = colLefts[col];
+          const baseY = rowTops[row] + (rowYOffsets[row] ?? 0);
+          const rowHeightActual = baseRowH * (rowHeightScales[row] ?? 1.0);
+          const cellH = rowHeightActual * pr.hFrac;
+          const charCells = [];
+          for (let b = 0; b < pr.wboxes; b++) {
+            const bx = baseX + refW + 8 + b * (cellW + gap);
+            const by = baseY + rowHeightActual * (pr.padFrac / 100);
+            charCells.push({ bx, by, bw: cellW, bh: cellH });
+          }
+          cells.push({
+            charCells,
+            row,
+            col,
+            baseX,
+            baseY,
+            cellH,
+            rowHeightActual,
+          });
+        }
+        return {
+          cells,
+          colWidths: colWidths,
+          baseColWidth,
+          baseRowH,
+          refW,
+          x0,
+          y0,
+          rowTops,
+          cellW,
+          gap,
+          nRows,
+        };
+      }
+
+      function draw() {
+        if (!img) return;
+        const wrap = g("canvasWrap");
+        const pw = wrap.clientWidth,
+          ph = wrap.clientHeight;
+        canvas.width = pw;
+        canvas.height = ph;
+        ctx.clearRect(0, 0, pw, ph);
+        const dx = panX + (pw - imgW * scale) / 2;
+        const dy = panY + (ph - imgH * scale) / 2;
+        ctx.drawImage(img, dx, dy, imgW * scale, imgH * scale);
+        const pr = getGlobal();
+        const layout = computeLayout(pr);
+        if (!layout) return;
+        const { cells, refW, nRows } = layout;
+
+        // highlight hovered row
+        if (hoveredRow >= 0 && layout.rowTops[hoveredRow] !== undefined) {
+          const ry =
+            layout.rowTops[hoveredRow] + (rowYOffsets[hoveredRow] ?? 0);
+          const rh = layout.baseRowH * (rowHeightScales[hoveredRow] ?? 1.0);
+          ctx.fillStyle = "rgba(255,184,79,0.08)";
+          ctx.fillRect(dx, dy + ry * scale, imgW * scale, rh * scale);
+          ctx.fillStyle = "#ffb84fcc";
+          ctx.font = `bold ${Math.max(10, 12 * scale)}px "JetBrains Mono", monospace`;
+          ctx.fillText(`ROW ${hoveredRow + 1}`, dx + 5, dy + (ry + 14) * scale);
+        }
+
+        // reference boxes
+        ctx.strokeStyle = "rgba(91,143,255,0.75)";
+        ctx.fillStyle = "rgba(91,143,255,0.08)";
+        for (let i = 0; i < pr.nchars; i++) {
+          const { baseX, baseY, rowHeightActual } = cells[i];
+          ctx.fillRect(
+            dx + baseX * scale,
+            dy + baseY * scale,
+            refW * scale,
+            rowHeightActual * pr.hFrac * scale,
+          );
+          ctx.strokeRect(
+            dx + baseX * scale,
+            dy + baseY * scale,
+            refW * scale,
+            rowHeightActual * pr.hFrac * scale,
+          );
+        }
+
+        // write cells
+        for (let i = 0; i < pr.nchars; i++) {
+          const { charCells, row } = cells[i];
+          const isHov = row === hoveredRow;
+          for (let { bx, by, bw, bh } of charCells) {
+            const oob = bx < 0 || by < 0 || bx + bw > imgW || by + bh > imgH;
+            ctx.strokeStyle = oob
+              ? "rgba(255,80,96,0.9)"
+              : isHov
+                ? "#ffb84fcc"
+                : "#4fffb0cc";
+            ctx.fillStyle = oob
+              ? "rgba(255,80,96,0.12)"
+              : isHov
+                ? "rgba(255,184,79,0.12)"
+                : "rgba(79,255,176,0.08)";
+            ctx.fillRect(
+              dx + bx * scale,
+              dy + by * scale,
+              bw * scale,
+              bh * scale,
+            );
+            ctx.strokeRect(
+              dx + bx * scale,
+              dy + by * scale,
+              bw * scale,
+              bh * scale,
+            );
+          }
+        }
+        g("hdrCells").textContent = pr.nchars * pr.wboxes;
+        g("hdrRows").textContent = nRows;
+      }
+
+      // Right panel dynamic: rows + each column control inside each row? We'll show per-row plus per-column sections neatly
+      function buildControls() {
+        if (!img) return;
+        const pr = getGlobal();
+        const nRows = numRows(pr);
+        // ensure arrays
+        while (rowYOffsets.length < nRows) rowYOffsets.push(0);
+        while (rowHeightScales.length < nRows) rowHeightScales.push(1.0);
+        rowYOffsets.length = nRows;
+        rowHeightScales.length = nRows;
+        while (colXOffsets.length < pr.cols) colXOffsets.push(0);
+        while (colWidthScales.length < pr.cols) colWidthScales.push(1.0);
+        colXOffsets.length = pr.cols;
+        colWidthScales.length = pr.cols;
+
+        const listDiv = g("rowList");
+        listDiv.innerHTML = "";
+
+        for (let r = 0; r < nRows; r++) {
+          const rowDiv = document.createElement("div");
+          rowDiv.className = "row-item";
+          rowDiv.dataset.row = r;
+          const startIdx = r * pr.cols;
+          const endIdx = Math.min(startIdx + pr.cols - 1, pr.nchars - 1);
+          const names = g("classNames")
+            .value.trim()
+            .split("\n")
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const firstName = names[startIdx] || `c${startIdx}`;
+          const lastName = names[endIdx] || `c${endIdx}`;
+
+          rowDiv.innerHTML = `
+                    <div class="row-item-header"><span class="row-num">ROW ${r + 1}</span><span class="row-chars">${firstName}→${lastName}</span><button class="reset-row-btn" onclick="resetSingleRow(${r}, event)">↺ Row</button></div>
+                    <div class="mini-row"><span class="mini-label">Y offset (px)</span><input type="range" class="mini" id="rowY_${r}" min="-120" max="120" value="${rowYOffsets[r]}" step="1"><span class="mini-val" id="rowYv_${r}">${rowYOffsets[r]}px</span></div>
+                    <div class="mini-row"><span class="mini-label">Height %</span><input type="range" class="mini" id="rowH_${r}" min="50" max="180" value="${Math.round(rowHeightScales[r] * 100)}" step="1"><span class="mini-val" id="rowHv_${r}">${Math.round(rowHeightScales[r] * 100)}%</span></div>
+                    <div class="section-title" style="margin-top:6px; margin-bottom:2px;">Columns for this row (shared across sheet)</div>
+                `;
+          // per-column controls (global columns affect all rows)
+          for (let c = 0; c < pr.cols; c++) {
+            const colDiv = document.createElement("div");
+            colDiv.className = "mini-row";
+            colDiv.style.marginLeft = "8px";
+            colDiv.innerHTML = `
+                        <span class="mini-label" style="width:40px;">Col ${c + 1}</span>
+                        <span style="font-size:8px;">X shift</span>
+                        <input type="range" id="colX_${c}" min="-60" max="60" value="${colXOffsets[c]}" step="1" style="width:70px;" oninput="updateColX(${c}, this.value)">
+                        <span class="mini-val" id="colXv_${c}">${colXOffsets[c]}px</span>
+                        <span style="font-size:8px;">Width %</span>
+                        <input type="range" id="colW_${c}" min="60" max="140" value="${Math.round(colWidthScales[c] * 100)}" step="1" style="width:60px;" oninput="updateColW(${c}, this.value)">
+                        <span class="mini-val" id="colWv_${c}">${Math.round(colWidthScales[c] * 100)}%</span>
+                    `;
+            rowDiv.appendChild(colDiv);
+          }
+          rowDiv.addEventListener("mouseenter", () => {
+            hoveredRow = r;
+            setActiveRow(r);
+            draw();
+            g("rowTooltip").style.display = "block";
+            g("rowTooltip").textContent = `ROW ${r + 1}`;
+          });
+          rowDiv.addEventListener("mouseleave", () => {
+            hoveredRow = -1;
+            draw();
+            g("rowTooltip").style.display = "none";
+          });
+          listDiv.appendChild(rowDiv);
+        }
+
+        // attach row listeners after creation
+        for (let r = 0; r < nRows; r++) {
+          const ySlider = g(`rowY_${r}`);
+          const hSlider = g(`rowH_${r}`);
+          if (ySlider)
+            ySlider.oninput = (e) => {
+              rowYOffsets[r] = parseInt(e.target.value);
+              g(`rowYv_${r}`).innerText = rowYOffsets[r] + "px";
+              draw();
+            };
+          if (hSlider)
+            hSlider.oninput = (e) => {
+              rowHeightScales[r] = parseInt(e.target.value) / 100;
+              g(`rowHv_${r}`).innerText = e.target.value + "%";
+              draw();
+            };
+        }
+      }
+
+      function updateColX(c, val) {
+        colXOffsets[c] = parseInt(val);
+        g(`colXv_${c}`).innerText = val + "px";
+        draw();
+      }
+      function updateColW(c, val) {
+        colWidthScales[c] = parseInt(val) / 100;
+        g(`colWv_${c}`).innerText = val + "%";
+        draw();
+      }
+      function setActiveRow(r) {
+        document.querySelectorAll(".row-item").forEach((el, i) => {
+          el.classList.toggle("active", i === r);
+        });
+      }
+      function resetSingleRow(r, evt) {
+        if (evt) evt.stopPropagation();
+        rowYOffsets[r] = 0;
+        rowHeightScales[r] = 1.0;
+        if (g(`rowY_${r}`)) g(`rowY_${r}`).value = 0;
+        if (g(`rowH_${r}`)) g(`rowH_${r}`).value = 100;
+        if (g(`rowYv_${r}`)) g(`rowYv_${r}`).innerText = "0px";
+        if (g(`rowHv_${r}`)) g(`rowHv_${r}`).innerText = "100%";
+        draw();
+      }
+      function resetAllPerRowCol() {
+        const pr = getGlobal();
+        for (let i = 0; i < rowYOffsets.length; i++) rowYOffsets[i] = 0;
+        for (let i = 0; i < rowHeightScales.length; i++)
+          rowHeightScales[i] = 1.0;
+        for (let i = 0; i < colXOffsets.length; i++) {
+          colXOffsets[i] = 0;
+          colWidthScales[i] = 1.0;
+          if (g(`colX_${i}`)) {
+            g(`colX_${i}`).value = 0;
+            g(`colXv_${i}`).innerText = "0px";
+          }
+          if (g(`colW_${i}`)) {
+            g(`colW_${i}`).value = 100;
+            g(`colWv_${i}`).innerText = "100%";
+          }
+        }
+        for (let r = 0; r < rowYOffsets.length; r++) {
+          if (g(`rowY_${r}`)) {
+            g(`rowY_${r}`).value = 0;
+            g(`rowYv_${r}`).innerText = "0px";
+          }
+          if (g(`rowH_${r}`)) {
+            g(`rowH_${r}`).value = 100;
+            g(`rowHv_${r}`).innerText = "100%";
+          }
+        }
+        draw();
+      }
+
+      // file loading, zoom, pan boilerplate
+      g("fileInput").addEventListener("change", (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const image = new Image();
+          image.onload = () => {
+            img = image;
+            imgW = image.naturalWidth;
+            imgH = image.naturalHeight;
+            g("uploadPrompt").style.display = "none";
+            canvas.style.display = "block";
+            g("zoomBar").classList.add("visible");
+            g("btnExtract").disabled = false;
+            g("hdrInfo").textContent = `${imgW}×${imgH}px`;
+            setStatus("Image loaded — adjust green boxes", "ok");
+            rowYOffsets = [];
+            rowHeightScales = [];
+            colXOffsets = [];
+            colWidthScales = [];
+            fitToWrap();
+            buildControls();
+            draw();
+          };
+          image.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+        e.target.value = "";
+      });
+
+      function fitToWrap() {
+        const w = g("canvasWrap").clientWidth,
+          h = g("canvasWrap").clientHeight;
+        if (img) {
+          scale = Math.min(w / imgW, h / imgH) * 0.94;
+          panX = 0;
+          panY = 0;
+          g("zoomLabel").textContent = Math.round(scale * 100) + "%";
+          draw();
+        }
+      }
+      function zoom(d) {
+        scale = Math.max(0.05, Math.min(10, scale + d));
+        g("zoomLabel").textContent = Math.round(scale * 100) + "%";
+        draw();
+      }
+      function resetZoom() {
+        fitToWrap();
+        draw();
+      }
+      canvas.addEventListener("mousedown", (e) => {
+        if (e.button === 1 || e.altKey || e.button === 2) {
+          isPanning = true;
+          lastPan = { x: e.clientX, y: e.clientY };
+          canvas.style.cursor = "grabbing";
+          e.preventDefault();
+        }
+      });
+      window.addEventListener("mousemove", (e) => {
+        if (!isPanning) return;
+        panX += e.clientX - lastPan.x;
+        panY += e.clientY - lastPan.y;
+        lastPan = { x: e.clientX, y: e.clientY };
+        draw();
+      });
+      window.addEventListener("mouseup", () => {
+        isPanning = false;
+        if (img) canvas.style.cursor = "crosshair";
+      });
+      canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+      canvas.addEventListener(
+        "wheel",
+        (e) => {
+          e.preventDefault();
+          zoom(e.deltaY < 0 ? 0.1 : -0.1);
+        },
+        { passive: false },
+      );
+      window.addEventListener("resize", () => {
+        if (img) {
+          fitToWrap();
+          draw();
+        }
+      });
+
+      function setStatus(msg, type) {
+        g("statusMsg").innerHTML = type
+          ? `<span class="${type}">${msg}</span>`
+          : msg;
+      }
+
+      // extraction with per-row/col adjustments
+      async function extractAll() {
+        if (!img) return;
+        const pr = getGlobal();
+        const layout = computeLayout(pr);
+        if (!layout) return;
+        const names = g("classNames")
+          .value.trim()
+          .split("\n")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (names.length < pr.nchars) {
+          setStatus(`⚠ need ${pr.nchars} class names`, "warn");
+          return;
+        }
+        g("btnExtract").disabled = true;
+        const pb = g("progBar");
+        pb.style.display = "block";
+        const zip = new JSZip();
+        const total = pr.nchars * pr.wboxes;
+        let saved = 0,
+          blank = 0,
+          done = 0;
+        const fc = document.createElement("canvas");
+        fc.width = imgW;
+        fc.height = imgH;
+        fc.getContext("2d").drawImage(img, 0, 0);
+        const fctx = fc.getContext("2d");
+        const off = document.createElement("canvas");
+        const offCtx = off.getContext("2d");
+        const tmp = document.createElement("canvas");
+        const tmpCtx = tmp.getContext("2d");
+        for (let i = 0; i < pr.nchars; i++) {
+          const className = names[i];
+          const { charCells } = layout.cells[i];
+          for (let b = 0; b < charCells.length; b++) {
+            let { bx, by, bw, bh } = charCells[b];
+            const pad = 3;
+            let x0 = Math.max(0, Math.round(bx + pad));
+            let y0 = Math.max(0, Math.round(by + pad));
+            let x1 = Math.min(imgW, Math.round(bx + bw - pad));
+            let y1 = Math.min(imgH, Math.round(by + bh - pad));
+            let cw = x1 - x0,
+              ch = y1 - y0;
+            done++;
+            if (cw < 4 || ch < 4) {
+              blank++;
+              updateProg(done, total);
+              continue;
+            }
+            const px = fctx.getImageData(x0, y0, cw, ch);
+            let dark = 0;
+            const gray = new Uint8ClampedArray(cw * ch);
+            for (let p = 0; p < px.data.length; p += 4) {
+              let gv =
+                0.299 * px.data[p] +
+                0.587 * px.data[p + 1] +
+                0.114 * px.data[p + 2];
+              gray[p / 4] = gv;
+              if (gv < 80) dark++;
+            }
+            if (dark < 80) {
+              blank++;
+              updateProg(done, total);
+              continue;
+            }
+            tmp.width = cw;
+            tmp.height = ch;
+            const gid = tmpCtx.createImageData(cw, ch);
+            for (let k = 0; k < gray.length; k++) {
+              gid.data[k * 4] =
+                gid.data[k * 4 + 1] =
+                gid.data[k * 4 + 2] =
+                  gray[k];
+              gid.data[k * 4 + 3] = 255;
+            }
+            tmpCtx.putImageData(gid, 0, 0);
+            off.width = 128;
+            off.height = 128;
+            offCtx.fillStyle = "#fff";
+            offCtx.fillRect(0, 0, 128, 128);
+            offCtx.drawImage(tmp, 0, 0, 128, 128);
+            const b64 = off.toDataURL("image/png").split(",")[1];
+            zip
+              .folder(className)
+              .file(`hw_b${b}_${String(i).padStart(3, "0")}.png`, b64, {
+                base64: true,
+              });
+            saved++;
+            updateProg(done, total);
+            if (done % 20 === 0) await new Promise((r) => setTimeout(r, 0));
+          }
+        }
+        setStatus(`✓ ${saved} crops, ${blank} blank – building ZIP`, "ok");
+        const blob = await zip.generateAsync({ type: "blob" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "newa_handwritten_crops.zip";
+        a.click();
+        pb.style.display = "none";
+        g("btnExtract").disabled = false;
+        setStatus(`✓ Done! ${saved} crops saved.`, "ok");
+      }
+      function updateProg(done, total) {
+        g("progFill").style.width = Math.round((done / total) * 100) + "%";
+      }
+      window.buildControls = buildControls; // init dynamic after global sliders rebuild
+      [
+        "sCols",
+        "sWbox",
+        "sChars",
+        "sLeft",
+        "sTop",
+        "sRight",
+        "sBot",
+        "sRef",
+        "sH",
+        "sPad",
+      ].forEach((id) => {
+        g(id).addEventListener("input", () => {
+          if (g(id).id.includes("s")) {
+            const vid = id.replace("s", "v");
+            if (g(vid)) g(vid).textContent = g(id).value;
+          }
+          if (id === "sChars" || id === "sCols") {
+            if (img) buildControls();
+          }
+          draw();
+        });
+      });
+      g("classNames").addEventListener("input", () => {
+        if (img) buildControls();
+      });
+    </script>
+  </body>
+</html>

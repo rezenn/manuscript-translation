@@ -1,7 +1,13 @@
 dataset_raw/
 dataset_final/
 font_inspection/
-newa_env/
+new_env/
+checkpoints/
+character_sheets/
+debug_crops/
+handwritten_dataset/
+figures/
+
 
 __pycache__/
 *.pyc
