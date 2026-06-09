@@ -305,6 +305,29 @@ if __name__ == "__main__":
 
     check_coverage(classes)
 
+# Simple wrapper functions for external imports
+def to_devanagari(class_name: str) -> str:
+    """Wrapper for get_char_info returning Devanagari character."""
+    info = get_char_info(class_name)
+    return info["deva"]
+
+
+def to_iast(class_name: str) -> str:
+    """Wrapper for get_char_info returning IAST character."""
+    info = get_char_info(class_name)
+    return info["iast"]
+
+
+# For backward compatibility
+def convert_to_devanagari(class_names: list) -> str:
+    """Convert list of class names to Devanagari string."""
+    return convert_sequence(class_names, output_format="devanagari")
+
+
+def convert_to_iast(class_names: list) -> str:
+    """Convert list of class names to IAST string."""
+    return convert_sequence(class_names, output_format="iast")
+
     print("\n── Sequence test ──")
     seq = ["ka", "matra_aa", "la", "virama", "pa", "matra_aa", "danda"]
     print(f"Input:      {seq}")

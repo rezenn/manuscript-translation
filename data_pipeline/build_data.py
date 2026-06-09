@@ -16,8 +16,8 @@ SOURCES = [
     # (directory,                            weight)
     ("dataset_raw/augmented_noto",           1.5),
     ("dataset_raw/augmented_ranjana",        2.0),
-    ("dataset_raw/augmented_handwritten_dataset",      3.0),
-    ("dataset_raw/augmented_manuscript",         4.0),
+    ("dataset_raw/handwritten_dataset",      3.0),
+    ("dataset_raw/augmented_manuscript",         3.0),
 ]
 
 OUTPUT  = "dataset_final"

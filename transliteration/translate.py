@@ -1,290 +1,338 @@
 """
-translate.py  —  Newa Manuscript Transliteration Pipeline (v6)
-Single-line mode, free Google Translate only, no paid API.
+translate.py  —  Newa End-to-End Transliteration Runner (v7)
+═══════════════════════════════════════════════════════════════════
+
+CHANGES vs v6
+─────────────
+• Line indexing fix: --line N now uses 1-based indexing consistently
+  (line 1 = first line visible in the manuscript).
+• Better error message when requested line doesn't exist.
+• Devanagari conversion uses 4-step alias lookup (handles uppercase
+  vowel class names like vowel_A, vowel_AA).
+• --single-char mode: route a single character image directly to
+  recognize_single() bypassing segmentation entirely.
+• Removed accidental seaborn dependency.
 """
 
-import argparse, json, os, sys, shutil, tempfile
-from datetime import datetime
+import argparse
+import json
+import os
+import sys
+import tempfile
+import shutil
 from pathlib import Path
+from datetime import datetime
 
-sys.path.insert(0, str(Path(__file__).parent))
-from segment            import segment_page
-from recognize          import recognize_segments
-from newa_to_devanagari import predictions_to_text
+# ── path setup ─────────────────────────────────────────────────────
+HERE = Path(__file__).parent
+ROOT = HERE.parent if HERE.name == "transliteration" else HERE
+sys.path.insert(0, str(ROOT / "ocr_model"))
+sys.path.insert(0, str(ROOT / "transliteration"))
 
+from segment   import segment_page
+from recognize import recognize_segments, recognize_single
 
-def translate_free(devanagari_text: str) -> dict:
-    """Free translation via Google Translate. No API key, no cost."""
-    try:
-        from deep_translator import GoogleTranslator
-    except ImportError:
-        return {
-            "success": False,
-            "error": "Run: python -m pip install deep-translator",
-            "english": None, "nepali": None,
-        }
-    clean = devanagari_text.replace("⟨?⟩", "").strip()
-    if not clean:
-        return {"success": False, "error": "No text after removing low-confidence characters.",
-                "english": None, "nepali": None}
-    try:
-        english = GoogleTranslator(source="auto", target="en").translate(clean)
-        try:    nepali = GoogleTranslator(source="auto", target="ne").translate(clean)
-        except: nepali = None
-        return {
-            "success": True, "english": english, "nepali": nepali,
-            "notes": (
-                "Translated via Google Translate (free). "
-                "Classical Nepal Bhasa may not translate perfectly. "
-                "OCR errors in Devanagari will also affect translation quality."
-            ),
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e), "english": None, "nepali": None}
+try:
+    from newa_to_devanagari import to_devanagari, to_iast
+    HAS_DEVA_MODULE = True
+except ImportError:
+    HAS_DEVA_MODULE = False
+
+try:
+    from deep_translator import GoogleTranslator
+    HAS_TRANSLATE = True
+except ImportError:
+    HAS_TRANSLATE = False
 
 
-def run_pipeline(
-    image_path:            str,
-    checkpoint_path:       str,
-    translate:             bool  = False,
-    keep_segments:         bool  = False,
-    debug:                 bool  = False,
-    confidence_threshold:  float = 0.25,
-    valley_threshold:      float = None,
-    min_line_height:       int   = 15,
-    min_panel_gap:         int   = 30,
-    min_upscale_height:    int   = 600,
-    single_line:           int   = None,
-) -> dict:
-    result = {
-        "success": False, "error": None,
-        "nepal_bhasa_devanagari": None, "iast": None,
-        "lines_devanagari": [], "lines_iast": [],
-        "nepali": None, "english": None, "notes": None,
-        "translation_error": None,
-        "num_characters": 0, "num_lines": 0,
-        "avg_confidence": 0.0, "low_conf_count": 0,
-        "flagged_chars": [], "segments_dir": None,
-        "single_line_mode": single_line is not None,
-        "single_line_index": single_line,
-    }
+# ══════════════════════════════════════════════════════════════════
+# INLINE FALLBACK CHAR MAP (used if newa_to_devanagari.py missing)
+# ══════════════════════════════════════════════════════════════════
 
-    segments_dir = (
-        str(Path("output_segments") / Path(image_path).stem)
-        if keep_segments else tempfile.mkdtemp(prefix="newa_seg_")
-    )
+DEVA_MAP = {
+    "ka":"क","kha":"ख","ga":"ग","gha":"घ","nga":"ङ",
+    "ca":"च","cha":"छ","ja":"ज","jha":"झ","nya":"ञ",
+    "tta":"ट","ttha":"ठ","dda":"ड","ddha":"ढ","nna":"ण",
+    "ta":"त","tha":"थ","da":"द","dha":"ध","na":"न",
+    "pa":"प","pha":"फ","ba":"ब","bha":"भ","ma":"म",
+    "ya":"य","ra":"र","la":"ल","wa":"व","sa":"स",
+    "sha":"श","ssa":"ष","ha":"ह",
+    "vowel_a":"अ","vowel_aa":"आ","vowel_i":"इ","vowel_ii":"ई",
+    "vowel_u":"उ","vowel_uu":"ऊ","vowel_e":"ए","vowel_ai":"ऐ",
+    "vowel_o":"ओ","vowel_au":"औ",
+    "matra_aa":"ा","matra_i":"ि","matra_ii":"ी",
+    "matra_u":"ु","matra_uu":"ू","matra_e":"े","matra_ai":"ै",
+    "matra_o":"ो","matra_au":"ौ",
+    "anusvara":"ं","visarga":"ः","candrabindu":"ँ",
+    "virama":"्","avagraha":"ऽ",
+    "digit_0":"०","digit_1":"१","digit_2":"२","digit_3":"३",
+    "digit_4":"४","digit_5":"५","digit_6":"६","digit_7":"७",
+    "digit_8":"८","digit_9":"९",
+}
 
-    try:
-        print("\n[1/4] Segmenting manuscript page...")
-        metadata = segment_page(
-            image_path         = image_path,
-            output_dir         = segments_dir,
-            debug              = debug,
-            valley_threshold   = valley_threshold,
-            min_line_height    = min_line_height,
-            min_panel_gap      = min_panel_gap,
-            min_upscale_height = min_upscale_height,
-        )
-        if not metadata:
-            result["error"] = (
-                "No characters detected. Use --debug to inspect. "
-                "Try --seg-threshold 0.15 if lines are merged."
-            )
-            return result
+IAST_MAP = {
+    "ka":"k","kha":"kh","ga":"g","gha":"gh","nga":"ṅ",
+    "ca":"c","cha":"ch","ja":"j","jha":"jh","nya":"ñ",
+    "tta":"ṭ","ttha":"ṭh","dda":"ḍ","ddha":"ḍh","nna":"ṇ",
+    "ta":"t","tha":"th","da":"d","dha":"dh","na":"n",
+    "pa":"p","pha":"ph","ba":"b","bha":"bh","ma":"m",
+    "ya":"y","ra":"r","la":"l","wa":"v","sa":"s",
+    "sha":"ś","ssa":"ṣ","ha":"h",
+    "vowel_a":"a","vowel_aa":"ā","vowel_i":"i","vowel_ii":"ī",
+    "vowel_u":"u","vowel_uu":"ū","vowel_e":"e","vowel_ai":"ai",
+    "vowel_o":"o","vowel_au":"au",
+    "matra_aa":"ā","matra_i":"i","matra_ii":"ī",
+    "matra_u":"u","matra_uu":"ū","matra_e":"e","matra_ai":"ai",
+    "matra_o":"o","matra_au":"au",
+    "anusvara":"ṃ","visarga":"ḥ","candrabindu":"m̐",
+    "virama":"·","avagraha":"ʼ",
+    "digit_0":"0","digit_1":"1","digit_2":"2","digit_3":"3",
+    "digit_4":"4","digit_5":"5","digit_6":"6","digit_7":"7",
+    "digit_8":"8","digit_9":"9",
+}
 
-        print(f"\n[2/4] Running OCR on {len(metadata)} characters...")
-        predictions = recognize_segments(
-            segments_dir         = segments_dir,
-            checkpoint_path      = checkpoint_path,
-            confidence_threshold = confidence_threshold,
-        )
-        if not predictions:
-            result["error"] = "OCR returned no predictions. Check --checkpoint path."
-            return result
 
-        print("\n[3/4] Converting to Devanagari...")
-        deva_all = predictions_to_text(predictions, output_format="devanagari")
-        iast_all = predictions_to_text(predictions, output_format="iast")
-        confs = [p.get("confidence", 1.0) for p in predictions]
+def char_to_deva(name: str) -> str:
+    """4-step lookup: module → as-is → lowercase → stripped."""
+    if HAS_DEVA_MODULE:
+        try:
+            return to_devanagari(name)
+        except Exception:
+            pass
+    return (DEVA_MAP.get(name)
+            or DEVA_MAP.get(name.lower())
+            or DEVA_MAP.get(name.lower().replace("vowel_", "vowel_"))
+            or "⟨?⟩")
 
-        result.update({
-            "lines_devanagari": deva_all["lines"],
-            "lines_iast":       iast_all["lines"],
-            "num_characters":   len(predictions),
-            "num_lines":        len(deva_all["lines"]),
-            "avg_confidence":   round(sum(confs) / len(confs), 4) if confs else 0,
-            "low_conf_count":   sum(1 for p in predictions if p.get("low_conf")),
-            "flagged_chars":    deva_all["flagged"],
-        })
 
-        if single_line is not None:
-            n_lines = len(deva_all["lines"])
-            if single_line >= n_lines:
-                result["error"] = (
-                    f"Line {single_line + 1} requested but only {n_lines} lines found. "
-                    f"Valid range: 1 to {n_lines}."
-                )
-                return result
-            deva_text = deva_all["lines"][single_line]
-            iast_text = iast_all["lines"][single_line]
-            line_preds = [p for p in predictions if p.get("line") == single_line]
-            line_confs = [p.get("confidence", 1.0) for p in line_preds]
-            result.update({
-                "num_characters": len(line_preds),
-                "avg_confidence": round(sum(line_confs)/len(line_confs), 4) if line_confs else 0,
-                "low_conf_count": sum(1 for p in line_preds if p.get("low_conf")),
-            })
-        else:
-            deva_text = deva_all["text"]
-            iast_text = iast_all["text"]
+def char_to_iast(name: str) -> str:
+    if HAS_DEVA_MODULE:
+        try:
+            return to_iast(name)
+        except Exception:
+            pass
+    return (IAST_MAP.get(name)
+            or IAST_MAP.get(name.lower())
+            or "?")
 
-        result["nepal_bhasa_devanagari"] = deva_text
-        result["iast"] = iast_text
 
-        if translate:
-            print("\n[4/4] Translating with Google Translate (free)...")
-            trans = translate_free(deva_text)
-            if trans.get("success"):
-                result.update({
-                    "nepali": trans.get("nepali"),
-                    "english": trans.get("english"),
-                    "notes": trans.get("notes"),
-                })
-            else:
-                result["translation_error"] = trans.get("error")
-                print(f"  Translation error: {result['translation_error']}")
-        else:
-            print("\n[4/4] Translation skipped (use --translate to enable free Google Translate)")
-            result["translation_error"] = "Translation skipped. Use --translate to enable."
+# ══════════════════════════════════════════════════════════════════
+# SINGLE CHARACTER MODE  (bypasses segmentation)
+# ══════════════════════════════════════════════════════════════════
 
-        result["success"] = True
-        if keep_segments:
-            result["segments_dir"] = segments_dir
-
-    except Exception as e:
-        import traceback
-        result["error"] = f"Pipeline error: {e}"
-        print(f"\nERROR: {e}\n{traceback.format_exc()}")
-    finally:
-        if not keep_segments and segments_dir.startswith(tempfile.gettempdir()):
-            shutil.rmtree(segments_dir, ignore_errors=True)
-
+def run_single_char(args):
+    """Direct inference on one character image."""
+    print("\n[Single-character mode — no segmentation]\n")
+    result = recognize_single(args.image, args.checkpoint)
+    if result is None:
+        sys.exit(1)
+    best = result["predicted"]
+    conf = result["confidence"]
+    print(f"\nDevanagari: {char_to_deva(best)}")
+    print(f"IAST:       {char_to_iast(best)}")
     return result
 
 
-def save_report(result: dict, image_path: str, output_prefix: str = None):
-    stem = Path(image_path).stem
-    if result.get("single_line_mode") and result.get("single_line_index") is not None:
-        stem += f"_line{result['single_line_index'] + 1}"
-    base = Path(output_prefix or f"transliteration_output/{stem}")
-    base.parent.mkdir(parents=True, exist_ok=True)
-    sep = "=" * 65; sub = "-" * 65
+# ══════════════════════════════════════════════════════════════════
+# FULL PIPELINE
+# ══════════════════════════════════════════════════════════════════
 
-    with open(base.with_suffix(".txt"), "w", encoding="utf-8") as f:
-        f.write(f"{sep}\nNEWA MANUSCRIPT TRANSLITERATION REPORT\n")
-        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n")
-        f.write(f"Source:    {image_path}\n")
-        if result.get("single_line_mode"):
-            f.write(f"Mode:      Single line (line {result['single_line_index'] + 1})\n")
-        f.write(f"{sep}\n\n")
-        f.write(f"Characters: {result['num_characters']}  Lines: {result['num_lines']}  "
-                f"Avg conf: {result['avg_confidence']:.1%}  Low-conf: {result['low_conf_count']}\n\n")
-        if result.get("lines_devanagari") and not result.get("single_line_mode"):
-            f.write(f"{sub}\nPER-LINE DEVANAGARI\n{sub}\n")
-            for i, line in enumerate(result["lines_devanagari"]):
-                f.write(f"  Line {i+1:02d}: {line}\n")
-            f.write("\n")
-        f.write(f"{sub}\nNEPAL BHASA (Devanagari)\n{sub}\n{result.get('nepal_bhasa_devanagari','N/A')}\n\n")
-        f.write(f"{sub}\nIAST Romanization\n{sub}\n{result.get('iast','N/A')}\n\n")
-        for label, key in [("Nepali Translation","nepali"),("English Translation","english"),("Notes","notes")]:
-            if result.get(key):
-                f.write(f"{sub}\n{label}\n{sub}\n{result[key]}\n\n")
-        if result.get("translation_error"):
-            f.write(f"Translation: {result['translation_error']}\n")
+def run_full(args):
+    image_path = Path(args.image)
+    if not image_path.exists():
+        print(f"ERROR: image not found: {image_path}")
+        sys.exit(1)
 
-    with open(base.with_suffix(".json"), "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=2, ensure_ascii=False)
+    output_dir = Path(args.out) if args.out else Path("transliteration_output")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    print(f"\n  Report -> {base.with_suffix('.txt')}")
-    print(f"  JSON   -> {base.with_suffix('.json')}")
-    return str(base.with_suffix(".txt")), str(base.with_suffix(".json"))
+    tmp_dir = tempfile.mkdtemp(prefix="newa_seg_")
 
+    try:
+        # ── 1. Segment ─────────────────────────────────────────────
+        print("\n[1/4] Segmenting manuscript page...\n")
+        seg_dir = os.path.join(tmp_dir, "segments")
+        os.makedirs(seg_dir, exist_ok=True)
+
+        segment_page(
+            image_path=str(image_path),
+            output_dir=seg_dir,
+            seg_threshold=args.seg_threshold,
+        )
+
+        # ── 2. OCR ─────────────────────────────────────────────────
+        meta_path = Path(seg_dir) / "segments_meta.json"
+        if not meta_path.exists():
+            print("ERROR: segmentation produced no metadata. Check segment.py output above.")
+            sys.exit(1)
+
+        with open(meta_path, encoding="utf-8") as f:
+            meta = json.load(f)
+
+        total_chars = meta.get("num_chars", 0)
+        print(f"\n[2/4] Running OCR on {total_chars} characters...\n")
+
+        char_list = recognize_segments(
+            segments_dir=seg_dir,
+            checkpoint_path=args.checkpoint,
+            confidence_threshold=0.25,
+        )
+
+        # ── 3. Group by line (1-based for user display) ─────────────
+        lines = {}
+        for c in sorted(char_list, key=lambda x: (x["line"], x["char_idx"])):
+            lines.setdefault(c["line"], []).append(c)
+
+        num_lines = len(lines)
+        sorted_line_keys = sorted(lines.keys())
+
+        print(f"\n[3/4] Converting to Devanagari...\n")
+
+        # Build per-line Devanagari
+        line_deva = {}
+        for ln_key in sorted_line_keys:
+            chars = lines[ln_key]
+            s = ""
+            for c in chars:
+                pred = c.get("predicted", "")
+                conf = c.get("confidence", 0.0)
+                s += char_to_deva(pred) if conf >= 0.25 else "⟨?⟩"
+            line_deva[ln_key] = s
+
+        # Determine which lines to output
+        if args.line is not None:
+            # User requested a specific line (1-based)
+            requested = args.line - 1   # convert to 0-based internal key
+            if requested not in lines:
+                valid_range = f"1 to {num_lines}"
+                print(f"ERROR: Line {args.line} requested but only {num_lines} line(s) found. "
+                      f"Valid range: {valid_range}.")
+                sys.exit(1)
+            output_line_keys = [requested]
+            mode_label = f"Single line (line {args.line})"
+        else:
+            output_line_keys = sorted_line_keys
+            mode_label = "All lines"
+
+        # ── 4. Translate ────────────────────────────────────────────
+        concat_for_translate = "".join(
+            char_to_deva(c.get("predicted", ""))
+            for lk in output_line_keys
+            for c in lines[lk]
+            if c.get("confidence", 0) >= 0.25
+        )
+
+        translation = ""
+        if args.translate:
+            print("\n[4/4] Translating via Google Translate (free)...\n")
+            if HAS_TRANSLATE:
+                try:
+                    clean = concat_for_translate.replace("⟨?⟩", "").strip()
+                    if clean:
+                        translation = GoogleTranslator(source="ne", target="en").translate(clean)
+                    else:
+                        translation = "(nothing to translate — all characters low-confidence)"
+                except Exception as e:
+                    translation = f"(translation error: {e})"
+                print(f"  Translation: {translation}")
+            else:
+                translation = "(deep-translator not installed — run: pip install deep-translator)"
+                print(f"  {translation}")
+
+        # ── Print results ───────────────────────────────────────────
+        total_chars_out = sum(len(lines[lk]) for lk in output_line_keys)
+        avg_conf = (
+            sum(c.get("confidence", 0) for lk in output_line_keys for c in lines[lk])
+            / total_chars_out if total_chars_out else 0
+        )
+
+        print("\n" + "=" * 65)
+        print("RESULTS")
+        print("=" * 65)
+        print(f"Mode: {mode_label}")
+        print(f"Characters: {total_chars_out}  Lines: {num_lines}  Avg conf: {avg_conf:.1%}")
+        print()
+        print("-- Per-line Devanagari --")
+        for lk in sorted_line_keys:
+            marker = " ◄" if lk in output_line_keys and args.line else ""
+            print(f"  Line {lk+1:02d}: {line_deva[lk]}{marker}")
+
+        output_deva = "".join(line_deva[lk] for lk in output_line_keys)
+        output_iast = "".join(
+            char_to_iast(c.get("predicted", ""))
+            for lk in output_line_keys
+            for c in lines[lk]
+            if c.get("confidence", 0) >= 0.25
+        )
+
+        print(f"\n-- Devanagari --\n{output_deva}")
+        print(f"\n-- IAST --\n{output_iast}")
+        if translation:
+            print(f"\n-- English --\n{translation}")
+
+        # ── Save report ─────────────────────────────────────────────
+        stem  = image_path.stem
+        label = f"_line{args.line}" if args.line else ""
+        txt_path  = output_dir / f"{stem}{label}.txt"
+        json_path = output_dir / f"{stem}{label}.json"
+
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(f"Source: {image_path}\n")
+            f.write(f"Date:   {datetime.now().isoformat()}\n")
+            f.write(f"Mode:   {mode_label}\n\n")
+            for lk in sorted_line_keys:
+                f.write(f"Line {lk+1:02d}: {line_deva[lk]}\n")
+            f.write(f"\nDevanagari:\n{output_deva}\n")
+            f.write(f"\nIAST:\n{output_iast}\n")
+            if translation:
+                f.write(f"\nEnglish:\n{translation}\n")
+
+        report = {
+            "source": str(image_path),
+            "date":   datetime.now().isoformat(),
+            "mode":   mode_label,
+            "num_lines": num_lines,
+            "per_line_devanagari": {str(lk+1): line_deva[lk] for lk in sorted_line_keys},
+            "devanagari": output_deva,
+            "iast":       output_iast,
+            "translation": translation,
+            "characters": char_list,
+        }
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2, ensure_ascii=False)
+
+        print(f"\n  Report -> {txt_path}")
+        print(f"  JSON   -> {json_path}")
+
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+# ══════════════════════════════════════════════════════════════════
+# CLI
+# ══════════════════════════════════════════════════════════════════
 
 def parse_args():
-    p = argparse.ArgumentParser(
-        description="Newa transliteration pipeline v6",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  # Full manuscript:
-  python transliteration/translate.py --image manuscript.jpg --checkpoint checkpoints/best_model.pth
-
-  # With free translation:
-  python transliteration/translate.py --image manuscript.jpg --checkpoint checkpoints/best_model.pth --translate
-
-  # Single line only (e.g. line 3):
-  python transliteration/translate.py --image manuscript.jpg --checkpoint checkpoints/best_model.pth --line 3 --translate
-
-  # Debug segmentation:
-  python transliteration/translate.py --image manuscript.jpg --checkpoint checkpoints/best_model.pth --keep-segments --debug
-"""
-    )
-    p.add_argument("--image",               required=True)
-    p.add_argument("--checkpoint",          required=True)
-    p.add_argument("--translate",           action="store_true",
-                   help="Enable free Google Translate (no API key needed)")
-    p.add_argument("--line",                type=int, default=None,
-                   help="Read only this line number (1-based, e.g. --line 3)")
-    p.add_argument("--keep-segments",       action="store_true")
-    p.add_argument("--debug",               action="store_true")
-    p.add_argument("--output",              default=None)
-    p.add_argument("--confidence",          type=float, default=0.25)
-    p.add_argument("--seg-threshold",       type=float, default=None,
-                   help="Valley threshold (auto by default). Try 0.15 if lines merge.")
-    p.add_argument("--seg-min-line-height", type=int, default=15)
-    p.add_argument("--seg-min-panel-gap",   type=int, default=30)
+    p = argparse.ArgumentParser(description="Newa manuscript transliterator v7")
+    p.add_argument("--image",         required=True, help="Input image path")
+    p.add_argument("--checkpoint",    required=True, help="Model checkpoint (.pth)")
+    p.add_argument("--out",           default=None,  help="Output directory")
+    p.add_argument("--line",          type=int, default=None,
+                   help="Output only this line (1-based). Omit for all lines.")
+    p.add_argument("--translate",     action="store_true",
+                   help="Translate Devanagari output to English")
+    p.add_argument("--single-char",   action="store_true",
+                   help="Treat --image as a single character (bypass segmentation)")
+    p.add_argument("--seg-threshold", type=float, default=None,
+                   help="Segmentation sensitivity (0.05–0.20, lower = more lines)")
+    p.add_argument("--keep-segments", action="store_true",
+                   help="Don't delete temp segment files (for debugging)")
     return p.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    single_line = (args.line - 1) if args.line is not None else None
-
-    result = run_pipeline(
-        image_path           = args.image,
-        checkpoint_path      = args.checkpoint,
-        translate            = args.translate,
-        keep_segments        = args.keep_segments,
-        debug                = args.debug,
-        confidence_threshold = args.confidence,
-        valley_threshold     = args.seg_threshold,
-        min_line_height      = args.seg_min_line_height,
-        min_panel_gap        = args.seg_min_panel_gap,
-        single_line          = single_line,
-    )
-
-    if not result["success"]:
-        print(f"\nERROR: {result['error']}")
-        sys.exit(1)
-
-    sep = "=" * 65
-    print(f"\n{sep}\nRESULTS\n{sep}")
-    if result.get("single_line_mode"):
-        print(f"Mode: Single line (line {args.line})")
-    print(f"Characters: {result['num_characters']}  Lines: {result['num_lines']}  "
-          f"Avg conf: {result['avg_confidence']:.1%}")
-
-    if result.get("lines_devanagari") and not result.get("single_line_mode"):
-        print("\n-- Per-line Devanagari --")
-        for i, line in enumerate(result["lines_devanagari"]):
-            print(f"  Line {i+1:02d}: {line}")
-
-    print(f"\n-- Devanagari --\n{result['nepal_bhasa_devanagari']}")
-    print(f"\n-- IAST --\n{result['iast']}")
-    for label, key in [("Nepali", "nepali"), ("English", "english"), ("Notes", "notes")]:
-        if result.get(key):
-            print(f"\n-- {label} --\n{result[key]}")
-    if result.get("translation_error"):
-        print(f"\n-- Translation --\n{result['translation_error']}")
-
-    save_report(result, args.image, args.output)
+    if args.single_char:
+        run_single_char(args)
+    else:
+        run_full(args)

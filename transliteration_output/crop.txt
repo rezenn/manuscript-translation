@@ -1,34 +1,33 @@
 =================================================================
 NEWA MANUSCRIPT TRANSLITERATION REPORT
-Generated: 2026-06-04 14:58
-Source:    C:\Users\Asus\Desktop\Manuscript images\497807659_3614171778883944_3013953446893330815_n.jpg
-Mode:      Single line (line 3)
+Generated: 2026-06-08 11:36
+Source:    crop_input
 =================================================================
 
-Characters: 24  Lines: 14  Avg conf: 57.2%  Low-conf: 1
+Characters: 1  Lines: 1  Avg conf: 66.0%  Low-conf: 0
+
+-----------------------------------------------------------------
+PER-LINE DEVANAGARI
+-----------------------------------------------------------------
+  Line 01: ण
 
 -----------------------------------------------------------------
 NEPAL BHASA (Devanagari)
 -----------------------------------------------------------------
-ेशखओखखऔखणखशओओईखखखशखईओखख⟨?⟩
+ण
 
 -----------------------------------------------------------------
 IAST Romanization
 -----------------------------------------------------------------
-eśakhaokhakhaaukhaṇakhaśaooīkhakhakhaśakhaīokhakha⟨?⟩
-
------------------------------------------------------------------
-Nepali Translation
------------------------------------------------------------------
-शखओखखऔखनखशओईखखशखईओख
+ṇa
 
 -----------------------------------------------------------------
 English Translation
 -----------------------------------------------------------------
-ेशखओखखऔखणखशओओईखखखशखईओखख
+n
 
 -----------------------------------------------------------------
 Notes
 -----------------------------------------------------------------
-Translated via Google Translate (free). Classical Nepal Bhasa may not translate perfectly. OCR errors in Devanagari will also affect translation quality.
+Translated via Google Translate (free, source hint: ne). Classical Nepal Bhasa may not translate perfectly — Google Translate has limited support for archaic Prachalit script text. OCR errors in the Devanagari will also affect translation quality.
 

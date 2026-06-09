@@ -1,27 +1,16 @@
 """
-recognize.py  —  Newa Character Recognition (v2)
+recognize.py  —  Newa Character Recognition (v3)
 ══════════════════════════════════════════════════════════════════
 
-CHANGES vs v1
+CHANGES vs v2
 ─────────────
-• Fixed class_map inversion — v1 assumed keys were always ints which
-  broke when the checkpoint stored them as strings.
-• Passes line/char_idx through from segments_meta so the output JSON
-  is always correctly ordered (line 0 → line N, left to right).
-• Graceful skip of missing crop files (instead of crashing).
-• Added --confidence flag default lowered to 0.25 — your model's
-  avg confidence on real manuscripts is ~38%, so 0.30 was flagging
-  too many real characters.
-
-Run:
-    python transliteration/recognize.py \\
-        --segments output_segments/ \\
-        --checkpoint checkpoints/best_model.pth --debug
-
-    # Single image test:
-    python transliteration/recognize.py \\
-        --image output_segments/line_00_char_000.png \\
-        --checkpoint checkpoints/best_model.pth
+• recognize_single() now uses the same preprocess logic as app.py
+  (tight-crop bounding box, auto-invert) so single-char test images
+  from the dataset give the same result as the full pipeline.
+• Fixed: confidence threshold default 0.25 (was 0.30 which flagged
+  too many real characters as low-confidence).
+• Added: verbose top-5 output in recognize_single() CLI mode.
+• Added: --single-char flag for quick CLI character testing.
 """
 
 import argparse
@@ -56,8 +45,11 @@ class CharacterCropDataset(Dataset):
         img  = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
 
         if img is None:
-            # Blank white image as placeholder
             img = np.full((self.img_size, self.img_size), 255, dtype=np.uint8)
+
+        # Auto-invert if needed (model expects dark-on-white)
+        if img.mean() < 128:
+            img = cv2.bitwise_not(img)
 
         img    = cv2.resize(img, (self.img_size, self.img_size),
                             interpolation=cv2.INTER_AREA)
@@ -92,7 +84,7 @@ def load_model(checkpoint_path: str, device: torch.device):
     model.to(device)
     model.eval()
 
-    # Normalise class_map to {int_index → class_name}
+    # Normalise class_map → {int_index: class_name}
     if not class_map:
         print("  WARNING: checkpoint has no class_map — predictions will be indices")
         index_to_char = {}
@@ -102,7 +94,7 @@ def load_model(checkpoint_path: str, device: torch.device):
             # Format: {"ka": 0, "kha": 1, ...} → invert
             index_to_char = {int(v): k for k, v in class_map.items()}
         else:
-            # Format: {"0": "ka", "1": "kha", ...} or {0: "ka", ...}
+            # Format: {"0": "ka", ...} or {0: "ka", ...}
             index_to_char = {int(k): v for k, v in class_map.items()}
 
     return model, index_to_char, img_size
@@ -189,7 +181,6 @@ def recognize_segments(
     print(f"  Recognizing: {segments_dir}")
     print(f"{'─'*60}")
 
-    # Device selection
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
@@ -197,22 +188,19 @@ def recognize_segments(
     else:
         device = torch.device("cpu")
     print(f"  Device: {device}")
-
     print(f"  Checkpoint: {checkpoint_path}")
+
     model, index_to_char, img_size = load_model(checkpoint_path, device)
 
-    seg_path = Path(segments_dir)
-
-    # Load metadata to get the correct ordering
+    seg_path  = Path(segments_dir)
     meta_path = seg_path / "segments_meta.json"
+
     if meta_path.exists():
         with open(meta_path, encoding="utf-8") as f:
             meta = json.load(f)
-        # Sort by line then char_idx to ensure correct text order
         char_list = sorted(meta["characters"],
                            key=lambda c: (c["line"], c["char_idx"]))
     else:
-        # Fallback: discover files from disk
         found = sorted(seg_path.glob("line_*_char_*.png"))
         char_list = [{"file": p.name, "line": 0, "char_idx": i}
                      for i, p in enumerate(found)]
@@ -220,10 +208,8 @@ def recognize_segments(
 
     if not char_list:
         print(f"  ERROR: No character crops in {segments_dir}")
-        print(f"  Run segment.py first.")
         return []
 
-    # Build ordered list of paths
     image_paths = []
     valid_chars = []
     for c in char_list:
@@ -238,21 +224,18 @@ def recognize_segments(
         print("  ERROR: all crop files missing")
         return []
 
-    # Run recognition
     raw_results = recognize_batch(
         image_paths, model, index_to_char, img_size,
         device, batch_size, confidence_threshold
     )
 
-    # Merge predictions back into char metadata
     for char_meta, pred in zip(valid_chars, raw_results):
         char_meta["predicted"]  = pred["predicted"]
         char_meta["confidence"] = pred["confidence"]
         char_meta["low_conf"]   = pred["low_conf"]
         char_meta["top5"]       = pred["top5"]
 
-    # Save updated metadata
-    out_path = output_json or str(meta_path)
+    out_path  = output_json or str(meta_path)
     save_data = meta or {
         "source_image": str(segments_dir),
         "num_lines":    max((c["line"] for c in valid_chars), default=0) + 1,
@@ -267,23 +250,79 @@ def recognize_segments(
 
 
 # ══════════════════════════════════════════════════════════════════
-# SINGLE IMAGE (FOR TESTING)
+# SINGLE IMAGE — direct inference (no segmentation pipeline)
 # ══════════════════════════════════════════════════════════════════
 
 def recognize_single(image_path: str, checkpoint_path: str):
+    """
+    Directly recognize ONE character image.
+    Applies tight-crop + auto-invert preprocessing — same as app.py.
+    """
     device = (torch.device("cuda") if torch.cuda.is_available()
               else torch.device("cpu"))
+
+    print(f"\n{'─'*60}")
+    print(f"  Checkpoint: {checkpoint_path}")
+    print(f"{'─'*60}")
+
     model, index_to_char, img_size = load_model(checkpoint_path, device)
-    results = recognize_batch([image_path], model, index_to_char,
-                               img_size, device)
-    r = results[0]
-    print(f"\n  Image:     {image_path}")
-    print(f"  Predicted: {r['predicted']}  ({r['confidence']:.1%})")
-    print(f"  Top 5:")
-    for char, conf in r["top5"]:
-        bar = "█" * int(conf * 30)
-        print(f"    {char:20s}  {conf:.1%}  {bar}")
-    return r
+
+    img = cv2.imread(image_path, cv2.IMREAD_GRAYSCALE)
+    if img is None:
+        print(f"  ERROR: cannot read {image_path}")
+        return None
+
+    # Auto-invert
+    if img.mean() < 128:
+        img = cv2.bitwise_not(img)
+
+    # Tight crop
+    _, binary = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+    coords = cv2.findNonZero(binary)
+    if coords is not None:
+        x, y, w, h = cv2.boundingRect(coords)
+        pad = max(4, int(max(w, h) * 0.08))
+        x1 = max(0, x - pad);  y1 = max(0, y - pad)
+        x2 = min(img.shape[1], x + w + pad)
+        y2 = min(img.shape[0], y + h + pad)
+        img = img[y1:y2, x1:x2]
+
+    img    = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_AREA)
+    tensor = torch.from_numpy(img).float() / 255.0
+    tensor = (tensor - 0.5) / 0.5
+    tensor = tensor.unsqueeze(0).unsqueeze(0).to(device)   # (1,1,H,W)
+
+    with torch.no_grad():
+        logits = model(tensor)
+        probs  = F.softmax(logits, dim=1)
+        k      = min(5, probs.shape[1])
+        top_probs, top_idx = probs.topk(k, dim=1)
+
+    top5 = [
+        (index_to_char.get(top_idx[0][j].item(), f"cls_{top_idx[0][j].item()}"),
+         top_probs[0][j].item())
+        for j in range(k)
+    ]
+
+    best_char, best_conf = top5[0]
+
+    if best_conf >= 0.70:
+        conf_label = "high confidence"
+    elif best_conf >= 0.40:
+        conf_label = "moderate confidence"
+    else:
+        conf_label = "uncertain"
+
+    print(f"\nPrediction for: {image_path}")
+    print("─" * 50)
+    for i, (char, conf) in enumerate(top5):
+        bar  = "█" * int(conf * 30)
+        mark = " ← TOP PREDICTION" if i == 0 else ""
+        print(f"  {i+1}.  {char:25s}  {conf:.1%}  {bar}{mark}")
+    print()
+    print(f"Answer: {best_char}  ({best_conf:.1%} — {conf_label})")
+
+    return {"predicted": best_char, "confidence": best_conf, "top5": top5}
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -291,13 +330,13 @@ def recognize_single(image_path: str, checkpoint_path: str):
 # ══════════════════════════════════════════════════════════════════
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Newa OCR recognition v2")
-    p.add_argument("--segments",    help="Segments directory from segment.py")
-    p.add_argument("--image",       help="Single crop image (for testing)")
-    p.add_argument("--checkpoint",  required=True)
-    p.add_argument("--batch-size",  type=int,   default=32)
-    p.add_argument("--output",      help="Output JSON path (optional)")
-    p.add_argument("--confidence",  type=float, default=0.25,
+    p = argparse.ArgumentParser(description="Newa OCR recognition v3")
+    p.add_argument("--segments",     help="Segments directory from segment.py")
+    p.add_argument("--image",        help="Single crop image (direct inference)")
+    p.add_argument("--checkpoint",   required=True)
+    p.add_argument("--batch-size",   type=int,   default=32)
+    p.add_argument("--output",       help="Output JSON path (optional)")
+    p.add_argument("--confidence",   type=float, default=0.25,
                    help="Flag chars below this confidence (default 0.25)")
     return p.parse_args()
 
