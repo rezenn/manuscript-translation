@@ -2,11 +2,9 @@ dataset_raw/
 dataset_final/
 font_inspection/
 new_env/
-checkpoints/
 character_sheets/
 debug_crops/
 handwritten_dataset/
-figures/
 
 
 __pycache__/
@@ -14,14 +12,12 @@ __pycache__/
 *.pyo
 *.pyd
 
-*.csv
 *.npy
 *.npz
 *.h5
 *.pkl
 
 *.pdf
-*.json
 
 .vscode/
 
@@ -29,6 +25,5 @@ __pycache__/
 Thumbs.db
 
 *.pt
-*.pth
 *.model
 

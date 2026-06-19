@@ -1,0 +1,24 @@
+{
+  "success": true,
+  "error": null,
+  "nepal_bhasa_devanagari": "ण",
+  "iast": "ṇa",
+  "lines_devanagari": [
+    "ण"
+  ],
+  "lines_iast": [
+    "ṇa"
+  ],
+  "nepali": null,
+  "english": "n",
+  "notes": "Translated via Google Translate (free, source hint: ne). Classical Nepal Bhasa may not translate perfectly — Google Translate has limited support for archaic Prachalit script text. OCR errors in the Devanagari will also affect translation quality.",
+  "translation_error": null,
+  "num_characters": 1,
+  "num_lines": 1,
+  "avg_confidence": 0.6604,
+  "low_conf_count": 0,
+  "flagged_chars": [],
+  "segments_dir": null,
+  "single_line_mode": false,
+  "single_line_index": null
+}
