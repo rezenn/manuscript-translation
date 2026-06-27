@@ -22,6 +22,12 @@ import tempfile
 import shutil
 from pathlib import Path
 
+# -- paths: MUST come before any local imports --
+_ROOT = Path(__file__).resolve().parent
+for _p in [str(_ROOT / "ocr_model"), str(_ROOT / "transliteration")]:
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
+
 import cv2
 import numpy as np
 import torch
@@ -30,13 +36,10 @@ import gradio as gr
 from PIL import Image
 
 # ── paths ──────────────────────────────────────────────────────────
-ROOT       = Path(__file__).parent
+ROOT       = Path(__file__).resolve().parent
 CKPT_PATH  = ROOT / "checkpoints" / "best_model.pth"
 OUTPUT_DIR = ROOT / "transliteration_output"
 OUTPUT_DIR.mkdir(exist_ok=True)
-
-sys.path.insert(0, str(ROOT / "ocr_model"))
-sys.path.insert(0, str(ROOT / "transliteration"))
 
 from model import build_model
 
@@ -65,6 +68,14 @@ try:
     HAS_TRANSLATE = True
 except ImportError:
     HAS_TRANSLATE = False
+
+try:
+    from postprocess import postprocess as _postprocess
+    HAS_POSTPROCESS = True
+except ImportError:
+    HAS_POSTPROCESS = False
+    def _postprocess(char_list, global_threshold=0.55):
+        return char_list   # no-op fallback
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -370,7 +381,9 @@ def translate_text(text: str, src_hint: str = "ne") -> str:
     if not HAS_TRANSLATE or not text.strip():
         return "(translation unavailable — install deep-translator)"
     try:
-        clean = text.replace("⟨?⟩", "").strip()
+        # Strip low-conf markers, line separators, and extra whitespace
+        clean = text.replace("⟨?⟩", "").replace(" | ", " ").strip()
+        clean = " ".join(clean.split())   # normalise whitespace
         if not clean:
             return "(nothing to translate)"
         return GoogleTranslator(source=src_hint, target="en").translate(clean)
@@ -413,6 +426,9 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
         if not char_list:
             return "❌ No characters found after segmentation.", "", "", "", None
 
+        # ── 2b. Post-process: attractor bias + sequence repair ──────
+        char_list = _postprocess(char_list, global_threshold=min_conf)
+
         # ── 3. Group by line ────────────────────────────────────────
         lines = {}
         for c in sorted(char_list, key=lambda x: (x["line"], x["char_idx"])):
@@ -420,29 +436,81 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
             lines.setdefault(ln, []).append(c)
 
         # ── 4. Build Devanagari strings ─────────────────────────────
+        # Consonant class names — these carry an inherent /a/ vowel
+        # unless immediately followed by a matra, virama, or another consonant
+        # (handled below via look-ahead).
+        CONSONANTS = {
+            "ka","kha","ga","gha","nga","ca","cha","ja","jha","nya",
+            "tta","ttha","dda","ddha","nna","ta","tha","da","dha","na",
+            "pa","pha","ba","bha","ma","ya","ra","la","wa","sha","ssa","sa","ha",
+        }
+        MATRAS = {
+            "matra_aa","matra_i","matra_ii","matra_u","matra_uu",
+            "matra_e","matra_ai","matra_o","matra_au",
+        }
+
+        def _build_line_deva(chars, min_conf):
+            """
+            Convert a list of char prediction dicts to a Devanagari string.
+            Implements: isolate char → recognise → build word → build sentence.
+
+            Rules applied:
+              • confidence < min_conf  → ⟨?⟩
+              • 'space' predicted      → U+0020 word separator
+              • consonant + matra      → consonant glyph + matra sign (no inherent a)
+              • consonant + virama     → consonant + virama (halant form)
+              • standalone consonant at end of word / before space/virama → as-is
+                (Devanagari renders the inherent /a/ by default)
+              • independent vowel      → vowel glyph
+            """
+            result = []
+            for i, c in enumerate(chars):
+                pred = c.get("predicted", "")
+                conf = c.get("confidence", 0.0)
+
+                # Synthetic space entry (injected by segment.py)
+                if pred == "space" or c.get("file") == "__space__":
+                    result.append(" ")
+                    continue
+
+                if conf < min_conf:
+                    result.append("⟨?⟩")
+                    continue
+
+                deva = char_to_devanagari(pred)
+                result.append(deva)
+
+            return "".join(result)
+
         line_strings = []
         for ln in sorted(lines):
             chars = lines[ln]
-            deva_line = ""
-            for c in chars:
-                pred = c.get("predicted", "")
-                conf = c.get("confidence", 0.0)
-                if conf < min_conf:
-                    deva_line += "⟨?⟩"
-                else:
-                    deva_line += char_to_devanagari(pred)
+            deva_line = _build_line_deva(chars, min_conf)
             line_strings.append(f"Line {ln+1:02d}: {deva_line}")
 
-        full_deva   = "\n".join(line_strings)
-        concat_deva = "".join(
-            char_to_devanagari(c.get("predicted", ""))
-            for c in char_list
-            if c.get("confidence", 0) >= min_conf
-        )
+        full_deva = "\n".join(line_strings)
+
+        # concat_deva = everything joined (spaces between words preserved)
+        all_deva_parts = []
+        prev_ln = None
+        for c in char_list:
+            ln = c.get("line", 0)
+            if prev_ln is not None and ln != prev_ln:
+                all_deva_parts.append(" | ")   # line separator
+            pred = c.get("predicted", "")
+            conf = c.get("confidence", 0.0)
+            if pred == "space" or c.get("file") == "__space__":
+                all_deva_parts.append(" ")
+            elif conf >= min_conf:
+                all_deva_parts.append(char_to_devanagari(pred))
+            prev_ln = ln
+        concat_deva = "".join(all_deva_parts)
+
         iast_str = "".join(
-            char_to_iast(c.get("predicted", ""))
+            (" " if (c.get("predicted") == "space" or c.get("file") == "__space__")
+             else char_to_iast(c.get("predicted", "")))
             for c in char_list
-            if c.get("confidence", 0) >= min_conf
+            if c.get("confidence", 0) >= min_conf or c.get("predicted") == "space"
         )
 
         # ── 5. Translate ────────────────────────────────────────────

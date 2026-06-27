@@ -175,7 +175,7 @@ def run_full(args):
         char_list = recognize_segments(
             segments_dir=seg_dir,
             checkpoint_path=args.checkpoint,
-            confidence_threshold=0.25,
+            confidence_threshold=args.conf_threshold,
         )
 
         # ── 3. Group by line (1-based for user display) ─────────────
@@ -196,7 +196,7 @@ def run_full(args):
             for c in chars:
                 pred = c.get("predicted", "")
                 conf = c.get("confidence", 0.0)
-                s += char_to_deva(pred) if conf >= 0.25 else "⟨?⟩"
+                s += char_to_deva(pred) if not c.get("low_conf", conf < args.conf_threshold) else "⟨?⟩"
             line_deva[ln_key] = s
 
         # Determine which lines to output
@@ -219,7 +219,7 @@ def run_full(args):
             char_to_deva(c.get("predicted", ""))
             for lk in output_line_keys
             for c in lines[lk]
-            if c.get("confidence", 0) >= 0.25
+            if not c.get("low_conf", c.get("confidence", 0) < args.conf_threshold)
         )
 
         translation = ""
@@ -262,7 +262,7 @@ def run_full(args):
             char_to_iast(c.get("predicted", ""))
             for lk in output_line_keys
             for c in lines[lk]
-            if c.get("confidence", 0) >= 0.25
+            if not c.get("low_conf", c.get("confidence", 0) < args.conf_threshold)
         )
 
         print(f"\n-- Devanagari --\n{output_deva}")
@@ -323,6 +323,11 @@ def parse_args():
                    help="Translate Devanagari output to English")
     p.add_argument("--single-char",   action="store_true",
                    help="Treat --image as a single character (bypass segmentation)")
+    p.add_argument("--conf-threshold", type=float, default=0.55,
+                   help="Min confidence (and margin) to accept a character "
+                        "prediction; below this, output ⟨?⟩ instead of a "
+                        "guess. Raised from 0.25 → 0.55 default (see "
+                        "recognize.py docstring for why).")
     p.add_argument("--seg-threshold", type=float, default=None,
                    help="Segmentation sensitivity (0.05–0.20, lower = more lines)")
     p.add_argument("--keep-segments", action="store_true",

@@ -1,0 +1,583 @@
+{
+  "split": "val",
+  "n_samples": 41968,
+  "num_classes": 67,
+  "top1_accuracy": 0.9606,
+  "top5_accuracy": 0.9943,
+  "macro_f1": 0.9616,
+  "micro_f1": 0.9606,
+  "zero_support_classes": [],
+  "weakest_classes": [
+    {
+      "class": "wa",
+      "precision": 0.891,
+      "recall": 0.8882,
+      "f1": 0.8896,
+      "support": 635
+    },
+    {
+      "class": "ya",
+      "precision": 0.935,
+      "recall": 0.8595,
+      "f1": 0.8956,
+      "support": 669
+    },
+    {
+      "class": "dda",
+      "precision": 0.9641,
+      "recall": 0.86,
+      "f1": 0.9091,
+      "support": 593
+    },
+    {
+      "class": "ba",
+      "precision": 0.9062,
+      "recall": 0.9123,
+      "f1": 0.9092,
+      "support": 593
+    },
+    {
+      "class": "vowel_U",
+      "precision": 0.8828,
+      "recall": 0.9528,
+      "f1": 0.9165,
+      "support": 593
+    },
+    {
+      "class": "kha",
+      "precision": 0.8611,
+      "recall": 0.9893,
+      "f1": 0.9208,
+      "support": 652
+    },
+    {
+      "class": "pa",
+      "precision": 0.9204,
+      "recall": 0.9219,
+      "f1": 0.9211,
+      "support": 627
+    },
+    {
+      "class": "da",
+      "precision": 0.8999,
+      "recall": 0.9505,
+      "f1": 0.9245,
+      "support": 728
+    },
+    {
+      "class": "na",
+      "precision": 0.8831,
+      "recall": 0.9798,
+      "f1": 0.929,
+      "support": 694
+    },
+    {
+      "class": "digit_2",
+      "precision": 0.9371,
+      "recall": 0.9247,
+      "f1": 0.9309,
+      "support": 677
+    },
+    {
+      "class": "matra_uu",
+      "precision": 0.9231,
+      "recall": 0.9402,
+      "f1": 0.9315,
+      "support": 702
+    },
+    {
+      "class": "ka",
+      "precision": 0.917,
+      "recall": 0.956,
+      "f1": 0.9361,
+      "support": 728
+    },
+    {
+      "class": "virama",
+      "precision": 0.895,
+      "recall": 0.9827,
+      "f1": 0.9368,
+      "support": 694
+    },
+    {
+      "class": "tha",
+      "precision": 0.9625,
+      "recall": 0.9155,
+      "f1": 0.9384,
+      "support": 757
+    },
+    {
+      "class": "digit_3",
+      "precision": 0.9315,
+      "recall": 0.9485,
+      "f1": 0.9399,
+      "support": 660
+    }
+  ],
+  "per_class": {
+    "anusvara": {
+      "precision": 0.9726,
+      "recall": 0.9617,
+      "f1": 0.9671,
+      "support": 627
+    },
+    "avagraha": {
+      "precision": 0.9882,
+      "recall": 0.9983,
+      "f1": 0.9932,
+      "support": 585
+    },
+    "ba": {
+      "precision": 0.9062,
+      "recall": 0.9123,
+      "f1": 0.9092,
+      "support": 593
+    },
+    "bha": {
+      "precision": 0.9686,
+      "recall": 0.9498,
+      "f1": 0.9592,
+      "support": 618
+    },
+    "ca": {
+      "precision": 0.9521,
+      "recall": 0.9386,
+      "f1": 0.9453,
+      "support": 635
+    },
+    "candrabindu": {
+      "precision": 0.9674,
+      "recall": 0.9312,
+      "f1": 0.949,
+      "support": 669
+    },
+    "cha": {
+      "precision": 0.9828,
+      "recall": 0.9629,
+      "f1": 0.9727,
+      "support": 593
+    },
+    "da": {
+      "precision": 0.8999,
+      "recall": 0.9505,
+      "f1": 0.9245,
+      "support": 728
+    },
+    "dda": {
+      "precision": 0.9641,
+      "recall": 0.86,
+      "f1": 0.9091,
+      "support": 593
+    },
+    "ddha": {
+      "precision": 0.9665,
+      "recall": 0.973,
+      "f1": 0.9697,
+      "support": 593
+    },
+    "dha": {
+      "precision": 0.9898,
+      "recall": 0.9385,
+      "f1": 0.9635,
+      "support": 618
+    },
+    "digit_0": {
+      "precision": 0.9433,
+      "recall": 0.9708,
+      "f1": 0.9569,
+      "support": 686
+    },
+    "digit_1": {
+      "precision": 0.9644,
+      "recall": 0.9644,
+      "f1": 0.9644,
+      "support": 702
+    },
+    "digit_2": {
+      "precision": 0.9371,
+      "recall": 0.9247,
+      "f1": 0.9309,
+      "support": 677
+    },
+    "digit_3": {
+      "precision": 0.9315,
+      "recall": 0.9485,
+      "f1": 0.9399,
+      "support": 660
+    },
+    "digit_4": {
+      "precision": 0.9507,
+      "recall": 0.9618,
+      "f1": 0.9562,
+      "support": 602
+    },
+    "digit_5": {
+      "precision": 0.9898,
+      "recall": 0.9635,
+      "f1": 0.9764,
+      "support": 602
+    },
+    "digit_6": {
+      "precision": 0.9931,
+      "recall": 0.9863,
+      "f1": 0.9897,
+      "support": 585
+    },
+    "digit_7": {
+      "precision": 0.9783,
+      "recall": 0.9798,
+      "f1": 0.9791,
+      "support": 644
+    },
+    "digit_8": {
+      "precision": 0.9883,
+      "recall": 0.9425,
+      "f1": 0.9648,
+      "support": 626
+    },
+    "digit_9": {
+      "precision": 0.9678,
+      "recall": 0.9814,
+      "f1": 0.9746,
+      "support": 644
+    },
+    "ga": {
+      "precision": 0.9733,
+      "recall": 0.9557,
+      "f1": 0.9644,
+      "support": 610
+    },
+    "gha": {
+      "precision": 0.9863,
+      "recall": 0.968,
+      "f1": 0.977,
+      "support": 593
+    },
+    "ha": {
+      "precision": 0.9808,
+      "recall": 0.9903,
+      "f1": 0.9855,
+      "support": 618
+    },
+    "ja": {
+      "precision": 0.9966,
+      "recall": 0.9701,
+      "f1": 0.9832,
+      "support": 602
+    },
+    "jha": {
+      "precision": 0.9829,
+      "recall": 0.968,
+      "f1": 0.9754,
+      "support": 593
+    },
+    "ka": {
+      "precision": 0.917,
+      "recall": 0.956,
+      "f1": 0.9361,
+      "support": 728
+    },
+    "kha": {
+      "precision": 0.8611,
+      "recall": 0.9893,
+      "f1": 0.9208,
+      "support": 652
+    },
+    "la": {
+      "precision": 0.9766,
+      "recall": 0.9882,
+      "f1": 0.9824,
+      "support": 677
+    },
+    "ma": {
+      "precision": 0.9757,
+      "recall": 0.9596,
+      "f1": 0.9676,
+      "support": 669
+    },
+    "matra_aa": {
+      "precision": 0.9439,
+      "recall": 0.969,
+      "f1": 0.9563,
+      "support": 677
+    },
+    "matra_ai": {
+      "precision": 0.9834,
+      "recall": 0.9612,
+      "f1": 0.9722,
+      "support": 618
+    },
+    "matra_au": {
+      "precision": 0.9966,
+      "recall": 0.9983,
+      "f1": 0.9974,
+      "support": 585
+    },
+    "matra_e": {
+      "precision": 0.9482,
+      "recall": 0.9936,
+      "f1": 0.9704,
+      "support": 626
+    },
+    "matra_i": {
+      "precision": 0.9677,
+      "recall": 0.9783,
+      "f1": 0.973,
+      "support": 644
+    },
+    "matra_ii": {
+      "precision": 0.9746,
+      "recall": 0.9534,
+      "f1": 0.9639,
+      "support": 644
+    },
+    "matra_o": {
+      "precision": 0.9948,
+      "recall": 0.9863,
+      "f1": 0.9906,
+      "support": 585
+    },
+    "matra_u": {
+      "precision": 0.9898,
+      "recall": 0.9165,
+      "f1": 0.9518,
+      "support": 635
+    },
+    "matra_uu": {
+      "precision": 0.9231,
+      "recall": 0.9402,
+      "f1": 0.9315,
+      "support": 702
+    },
+    "na": {
+      "precision": 0.8831,
+      "recall": 0.9798,
+      "f1": 0.929,
+      "support": 694
+    },
+    "nga": {
+      "precision": 0.9914,
+      "recall": 0.9812,
+      "f1": 0.9863,
+      "support": 585
+    },
+    "nna": {
+      "precision": 0.9848,
+      "recall": 0.9848,
+      "f1": 0.9848,
+      "support": 593
+    },
+    "nya": {
+      "precision": 0.9948,
+      "recall": 0.9778,
+      "f1": 0.9862,
+      "support": 585
+    },
+    "pa": {
+      "precision": 0.9204,
+      "recall": 0.9219,
+      "f1": 0.9211,
+      "support": 627
+    },
+    "pha": {
+      "precision": 0.9914,
+      "recall": 0.9747,
+      "f1": 0.983,
+      "support": 593
+    },
+    "ra": {
+      "precision": 0.9777,
+      "recall": 0.9402,
+      "f1": 0.9586,
+      "support": 652
+    },
+    "sa": {
+      "precision": 0.9483,
+      "recall": 0.9689,
+      "f1": 0.9585,
+      "support": 644
+    },
+    "sha": {
+      "precision": 0.9966,
+      "recall": 0.9848,
+      "f1": 0.9907,
+      "support": 593
+    },
+    "ssa": {
+      "precision": 0.93,
+      "recall": 0.9803,
+      "f1": 0.9545,
+      "support": 610
+    },
+    "ta": {
+      "precision": 0.9913,
+      "recall": 0.9663,
+      "f1": 0.9787,
+      "support": 593
+    },
+    "tha": {
+      "precision": 0.9625,
+      "recall": 0.9155,
+      "f1": 0.9384,
+      "support": 757
+    },
+    "tta": {
+      "precision": 0.9783,
+      "recall": 0.9228,
+      "f1": 0.9498,
+      "support": 635
+    },
+    "ttha": {
+      "precision": 0.9869,
+      "recall": 0.9934,
+      "f1": 0.9901,
+      "support": 454
+    },
+    "virama": {
+      "precision": 0.895,
+      "recall": 0.9827,
+      "f1": 0.9368,
+      "support": 694
+    },
+    "visarga": {
+      "precision": 0.9534,
+      "recall": 0.9534,
+      "f1": 0.9534,
+      "support": 686
+    },
+    "vowel_A": {
+      "precision": 0.9866,
+      "recall": 0.9933,
+      "f1": 0.9899,
+      "support": 593
+    },
+    "vowel_AA": {
+      "precision": 0.9519,
+      "recall": 0.968,
+      "f1": 0.9599,
+      "support": 593
+    },
+    "vowel_AI": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 585
+    },
+    "vowel_AU": {
+      "precision": 0.9966,
+      "recall": 0.9932,
+      "f1": 0.9949,
+      "support": 585
+    },
+    "vowel_E": {
+      "precision": 0.9983,
+      "recall": 0.9932,
+      "f1": 0.9957,
+      "support": 585
+    },
+    "vowel_I": {
+      "precision": 0.9704,
+      "recall": 0.9795,
+      "f1": 0.9749,
+      "support": 635
+    },
+    "vowel_II": {
+      "precision": 0.9792,
+      "recall": 0.9675,
+      "f1": 0.9733,
+      "support": 584
+    },
+    "vowel_O": {
+      "precision": 0.9721,
+      "recall": 0.9538,
+      "f1": 0.9629,
+      "support": 585
+    },
+    "vowel_U": {
+      "precision": 0.8828,
+      "recall": 0.9528,
+      "f1": 0.9165,
+      "support": 593
+    },
+    "vowel_UU": {
+      "precision": 0.9766,
+      "recall": 0.9848,
+      "f1": 0.9807,
+      "support": 593
+    },
+    "wa": {
+      "precision": 0.891,
+      "recall": 0.8882,
+      "f1": 0.8896,
+      "support": 635
+    },
+    "ya": {
+      "precision": 0.935,
+      "recall": 0.8595,
+      "f1": 0.8956,
+      "support": 669
+    }
+  },
+  "confidence_calibration": [
+    {
+      "range": "0.0-0.1",
+      "n": 31,
+      "avg_confidence": 0.088,
+      "actual_accuracy": 0.065
+    },
+    {
+      "range": "0.1-0.2",
+      "n": 354,
+      "avg_confidence": 0.157,
+      "actual_accuracy": 0.299
+    },
+    {
+      "range": "0.2-0.3",
+      "n": 533,
+      "avg_confidence": 0.252,
+      "actual_accuracy": 0.403
+    },
+    {
+      "range": "0.3-0.4",
+      "n": 657,
+      "avg_confidence": 0.35,
+      "actual_accuracy": 0.577
+    },
+    {
+      "range": "0.4-0.5",
+      "n": 1004,
+      "avg_confidence": 0.455,
+      "actual_accuracy": 0.701
+    },
+    {
+      "range": "0.5-0.6",
+      "n": 1413,
+      "avg_confidence": 0.55,
+      "actual_accuracy": 0.795
+    },
+    {
+      "range": "0.6-0.7",
+      "n": 1751,
+      "avg_confidence": 0.653,
+      "actual_accuracy": 0.936
+    },
+    {
+      "range": "0.7-0.8",
+      "n": 2769,
+      "avg_confidence": 0.754,
+      "actual_accuracy": 0.978
+    },
+    {
+      "range": "0.8-0.9",
+      "n": 5513,
+      "avg_confidence": 0.858,
+      "actual_accuracy": 0.997
+    },
+    {
+      "range": "0.9-1.0",
+      "n": 27943,
+      "avg_confidence": 0.967,
+      "actual_accuracy": 1.0
+    }
+  ]
+}

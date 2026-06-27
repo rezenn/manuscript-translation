@@ -1,10 +1,27 @@
 """
-segment.py  —  Newa Manuscript Page Segmentation (v5)
+segment.py  —  Newa Manuscript Page Segmentation (v6)
 ══════════════════════════════════════════════════════════════════
 
-FIXES vs v4
-───────────
-v5 key improvements:
+FIXES vs v5  (v6)
+─────────────────
+v6 implements the teacher's feedback: isolate character → recognise →
+build word → build sentence.
+
+  1. find_characters_in_line() now applies a morphological CLOSE before
+     connected-component labelling.  This bridges the tiny ink gaps that
+     cursive/calligraphic Prachalit strokes leave after binarization,
+     preventing a single character from fragmenting into 3-4 blobs.
+
+  2. inject_spaces() is a new function that analyses the inter-character
+     gap distribution per line.  Wherever the gap exceeds 1.8× the median
+     inter-character gap it inserts a synthetic 'space' metadata entry.
+     This enables the downstream pipeline to produce word-separated output
+     rather than a raw character stream.
+
+  3. crop_and_save() now calls inject_spaces() and includes space entries
+     in segments_meta.json so recognize.py and app.py can honour them.
+
+Earlier v5 improvements retained:
   1. Stronger red/orange channel suppression using HSV red-mask.
   2. Smarter noise filtering — min_area raised, aspect-ratio filter added.
   3. Better border crop — Phase 2 threshold loosened to 60%.
@@ -317,14 +334,61 @@ def find_text_lines_in_panel(binary_panel: np.ndarray,
 # STEP 5 — FIND CHARACTERS IN A LINE
 # ══════════════════════════════════════════════════════════════════
 
+def _estimate_word_gap_threshold(boxes: list) -> float:
+    """
+    Given sorted character boxes, compute the inter-character gaps and
+    return a threshold above which a gap is considered a word space.
+
+    Strategy: collect all x-gaps between consecutive boxes.
+    A word gap is typically 1.5–2× the median character gap.
+    Returns the gap threshold in pixels (or a large number if too few gaps).
+    """
+    if len(boxes) < 3:
+        return 1e9  # not enough chars to detect spaces
+
+    gaps = []
+    for i in range(1, len(boxes)):
+        prev_x2 = boxes[i-1][0] + boxes[i-1][2]
+        curr_x1 = boxes[i][0]
+        gap = curr_x1 - prev_x2
+        gaps.append(gap)
+
+    if not gaps:
+        return 1e9
+
+    gaps_arr = np.array(sorted(gaps))
+    median_gap = float(np.median(gaps_arr))
+    # Word gap = anything > 1.8× median inter-char gap, minimum 4px
+    threshold = max(4.0, median_gap * 1.8)
+    return threshold
+
+
 def find_characters_in_line(binary_line: np.ndarray,
                              min_w: int = 6,
                              min_h: int = 6,
                              min_area: int = 40,
                              max_aspect: float = 8.0) -> list:
-    """Find character bounding boxes via connected components."""
+    """
+    Find character bounding boxes via connected components.
+
+    KEY FIX: before running connected components, apply a small morphological
+    CLOSE operation to bridge the tiny ink gaps that cursive/calligraphic
+    Prachalit strokes leave behind during binarization.  This prevents a
+    single character from fragmenting into 3-4 meaningless blobs.
+
+    The kernel is intentionally small (horizontal 3×1) so it only bridges
+    within-character gaps without merging adjacent characters.
+    """
+    # ── Morphological closing to bridge cursive ink gaps ──────────
+    # Horizontal close bridges gaps along the writing baseline.
+    # Vertical close re-connects ascenders/descenders to the base glyph.
+    k_h = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 1))
+    k_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 3))
+    bridged = cv2.morphologyEx(binary_line, cv2.MORPH_CLOSE, k_h)
+    bridged = cv2.morphologyEx(bridged,     cv2.MORPH_CLOSE, k_v)
+
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(
-        binary_line, connectivity=8)
+        bridged, connectivity=8)
     boxes = []
     for i in range(1, num_labels):
         x, y, w, h, area = stats[i]
@@ -335,6 +399,53 @@ def find_characters_in_line(binary_line: np.ndarray,
         boxes.append((x, y, w, h))
     boxes.sort(key=lambda b: b[0])
     return boxes
+
+
+def inject_spaces(boxes: list, char_meta_list: list) -> list:
+    """
+    Given sorted character boxes and their metadata dicts, insert synthetic
+    'space' entries wherever the inter-character gap exceeds the word-gap
+    threshold.  Returns an updated metadata list (with spaces inserted).
+
+    This implements the teacher's advice: isolate → recognise → build words
+    → build sentences.
+    """
+    if len(boxes) < 2:
+        return char_meta_list
+
+    threshold = _estimate_word_gap_threshold(boxes)
+
+    result = []
+    for i, meta in enumerate(char_meta_list):
+        result.append(meta)
+        if i < len(boxes) - 1:
+            prev_x2 = boxes[i][0] + boxes[i][2]
+            next_x1 = boxes[i+1][0]
+            gap = next_x1 - prev_x2
+            if gap > threshold:
+                # Insert a synthetic space entry
+                space_meta = {
+                    "file":       "__space__",
+                    "line":       meta.get("line", 0),
+                    "char_idx":   meta.get("char_idx", 0) + 0.5,
+                    "predicted":  "space",
+                    "confidence": 1.0,
+                    "low_conf":   False,
+                    "top5":       [("space", 1.0)],
+                    "page_x":     int(prev_x2),
+                    "page_y":     meta.get("page_y", 0),
+                    "width":      int(gap),
+                    "height":     meta.get("height", 10),
+                    "bbox": {
+                        "x": int(prev_x2),
+                        "y": meta.get("page_y", 0),
+                        "w": int(gap),
+                        "h": meta.get("height", 10),
+                    },
+                }
+                result.append(space_meta)
+
+    return result
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -440,6 +551,9 @@ def crop_and_save(img: np.ndarray,
                 global_line += 1
                 continue
 
+            # ── collect char metadata first, then inject spaces ──────
+            line_meta_raw = []
+            valid_boxes   = []   # parallel list of boxes for inject_spaces
             for char_idx, (x, y, w, h) in enumerate(boxes):
                 x1 = max(0, x - padding)
                 x2 = min(iw, x + w + padding)
@@ -452,7 +566,7 @@ def crop_and_save(img: np.ndarray,
                                       interpolation=cv2.INTER_AREA)
                 filename = f"line_{global_line:02d}_char_{char_idx:03d}.png"
                 cv2.imwrite(str(out / filename), resized)
-                metadata.append({
+                meta_entry = {
                     "file":       filename,
                     "line":       global_line,
                     "char_idx":   char_idx,
@@ -470,10 +584,19 @@ def crop_and_save(img: np.ndarray,
                         "w": int(x2 - x1),
                         "h": int(y2 - y1),
                     },
-                })
+                }
+                line_meta_raw.append(meta_entry)
+                valid_boxes.append((x, y, w, h))
                 total += 1
 
-            print(f"      Line {global_line:02d}: {len(boxes)} chars")
+            # Inject word-space markers based on inter-character gaps
+            line_meta_with_spaces = inject_spaces(valid_boxes, line_meta_raw)
+            metadata.extend(line_meta_with_spaces)
+
+            real_chars = len(line_meta_raw)
+            spaces_ins = len(line_meta_with_spaces) - real_chars
+            print(f"      Line {global_line:02d}: {real_chars} chars"
+                  f"  (+{spaces_ins} word spaces injected)")
             global_line += 1
 
     print(f"  Saved {total} crops → {output_dir}/")

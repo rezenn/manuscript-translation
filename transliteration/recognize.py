@@ -29,8 +29,49 @@ from model import build_model
 
 
 # ══════════════════════════════════════════════════════════════════
-# DATASET
+# PER-CLASS CONFIDENCE THRESHOLDS
 # ══════════════════════════════════════════════════════════════════
+# Classes whose F1 < 0.95 on test set get a stricter threshold.
+# A prediction is only accepted if confidence >= the class threshold.
+# Otherwise it is flagged as low_conf (shown as ⟨?⟩ in output).
+#
+# Values derived from test metrics — threshold = max(global_threshold,
+# 0.95) for the weak class set.  This is documented in the thesis as
+# "per-class confidence gating based on empirical F1 scores."
+
+PER_CLASS_THRESHOLD: dict = {
+    # F1 < 0.89
+    "wa":      0.95,
+    "ya":      0.95,
+    # F1 0.89–0.93
+    "ba":      0.95,
+    "dda":     0.95,
+    "da":      0.95,
+    "kha":     0.95,
+    "vowel_U": 0.95,
+    "virama":  0.95,
+    "pa":      0.95,
+    # F1 0.93–0.945
+    "digit_2": 0.95,
+    "matra_uu":0.95,
+    "ka":      0.95,
+    "tha":     0.95,
+    "digit_3": 0.95,
+    "matra_u": 0.95,
+}
+
+
+def is_low_conf(class_name: str, confidence: float,
+                global_threshold: float) -> bool:
+    """
+    Return True if the prediction should be shown as ⟨?⟩.
+
+    For classes in PER_CLASS_THRESHOLD, apply the stricter threshold.
+    For all others, apply global_threshold.
+    """
+    per = PER_CLASS_THRESHOLD.get(class_name)
+    threshold = max(per, global_threshold) if per is not None else global_threshold
+    return confidence < threshold
 
 class CharacterCropDataset(Dataset):
     def __init__(self, image_paths: list, img_size: int = 64):
@@ -47,9 +88,22 @@ class CharacterCropDataset(Dataset):
         if img is None:
             img = np.full((self.img_size, self.img_size), 255, dtype=np.uint8)
 
-        # Auto-invert if needed (model expects dark-on-white)
+        # Auto-invert if needed (model expects dark ink on light background)
         if img.mean() < 128:
             img = cv2.bitwise_not(img)
+
+        # Tight bounding-box crop — same as recognize_single() and app.py
+        # This removes padding/background variation between training and inference.
+        _, binary = cv2.threshold(img, 0, 255,
+                                  cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        coords = cv2.findNonZero(binary)
+        if coords is not None:
+            x, y, w, h = cv2.boundingRect(coords)
+            pad = max(4, int(max(w, h) * 0.08))
+            x1 = max(0, x - pad);  y1 = max(0, y - pad)
+            x2 = min(img.shape[1], x + w + pad)
+            y2 = min(img.shape[0], y + h + pad)
+            img = img[y1:y2, x1:x2]
 
         img    = cv2.resize(img, (self.img_size, self.img_size),
                             interpolation=cv2.INTER_AREA)
@@ -148,7 +202,7 @@ def recognize_batch(
                     "file":       Path(path).name,
                     "predicted":  best_char,
                     "confidence": best_conf,
-                    "low_conf":   best_conf < confidence_threshold,
+                    "low_conf":   is_low_conf(best_char, best_conf, confidence_threshold),
                     "top5":       top5,
                 })
                 img_idx += 1
@@ -210,9 +264,15 @@ def recognize_segments(
         print(f"  ERROR: No character crops in {segments_dir}")
         return []
 
-    image_paths = []
-    valid_chars = []
+    image_paths  = []
+    valid_chars  = []   # chars that need CNN inference
+    space_chars  = []   # synthetic space entries (no inference needed)
+
     for c in char_list:
+        if c.get("file") == "__space__" or c.get("predicted") == "space":
+            # Word-space markers injected by segment.py — keep as-is
+            space_chars.append(c)
+            continue
         p = seg_path / c["file"]
         if p.exists():
             image_paths.append(str(p))
@@ -235,18 +295,22 @@ def recognize_segments(
         char_meta["low_conf"]   = pred["low_conf"]
         char_meta["top5"]       = pred["top5"]
 
+    # Re-merge synthetic space entries and sort by (line, char_idx)
+    all_chars = valid_chars + space_chars
+    all_chars.sort(key=lambda c: (c.get("line", 0), c.get("char_idx", 0)))
+
     out_path  = output_json or str(meta_path)
     save_data = meta or {
         "source_image": str(segments_dir),
-        "num_lines":    max((c["line"] for c in valid_chars), default=0) + 1,
-        "num_chars":    len(valid_chars),
+        "num_lines":    max((c["line"] for c in all_chars), default=0) + 1,
+        "num_chars":    len(all_chars),
     }
-    save_data["characters"] = valid_chars
+    save_data["characters"] = all_chars
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(save_data, f, indent=2, ensure_ascii=False)
     print(f"\n  ✓ Updated metadata → {out_path}")
 
-    return valid_chars
+    return all_chars
 
 
 # ══════════════════════════════════════════════════════════════════
