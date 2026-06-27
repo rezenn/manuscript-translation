@@ -21,6 +21,7 @@ import json
 import tempfile
 import shutil
 from pathlib import Path
+from typing import Optional
 
 # -- paths: MUST come before any local imports --
 _ROOT = Path(__file__).resolve().parent
@@ -48,12 +49,15 @@ try:
     from segment   import segment_page
     HAS_SEGMENT = True
 except ImportError:
+    segment_page = None
     HAS_SEGMENT = False
 
 try:
     from recognize import recognize_segments, load_model as _load_model_rec
     HAS_RECOGNIZE = True
 except ImportError:
+    recognize_segments = None
+    _load_model_rec = None
     HAS_RECOGNIZE = False
 
 try:
@@ -61,12 +65,15 @@ try:
     HAS_DEVANAGARI = True
 except ImportError:
     # Inline minimal fallback so the char mode still works
+    to_devanagari = None
+    to_iast = None
     HAS_DEVANAGARI = False
 
 try:
     from deep_translator import GoogleTranslator
     HAS_TRANSLATE = True
 except ImportError:
+    GoogleTranslator = None
     HAS_TRANSLATE = False
 
 try:
@@ -131,7 +138,7 @@ NEWA_TO_IAST = {
 
 
 def char_to_devanagari(name: str) -> str:
-    if HAS_DEVANAGARI:
+    if HAS_DEVANAGARI and to_devanagari is not None:
         try:
             return to_devanagari(name)
         except Exception:
@@ -143,7 +150,7 @@ def char_to_devanagari(name: str) -> str:
 
 
 def char_to_iast(name: str) -> str:
-    if HAS_DEVANAGARI:
+    if HAS_DEVANAGARI and to_iast is not None:
         try:
             return to_iast(name)
         except Exception:
@@ -268,7 +275,7 @@ def infer_single_char(img_array: np.ndarray, top_k: int = 5):
 
     results = []
     for j in range(k):
-        idx  = top_idx[0][j].item()
+        idx  = int(top_idx[0][j].item())
         conf = top_probs[0][j].item()
         name = idx2char.get(idx, f"cls_{idx}")
         results.append((name, conf))
@@ -329,7 +336,7 @@ def process_single_character(image):
 # CROP HELPER — extract region from ImageEditor output
 # ══════════════════════════════════════════════════════════════════
 
-def _to_rgb_array(img) -> np.ndarray:
+def _to_rgb_array(img) -> Optional[np.ndarray]:
     """Convert PIL Image or numpy array to uint8 RGB numpy array."""
     if isinstance(img, Image.Image):
         return np.array(img.convert("RGB"))
@@ -378,7 +385,7 @@ def extract_cropped_region(editor_value):
 # ══════════════════════════════════════════════════════════════════
 
 def translate_text(text: str, src_hint: str = "ne") -> str:
-    if not HAS_TRANSLATE or not text.strip():
+    if not HAS_TRANSLATE or GoogleTranslator is None or not text.strip():
         return "(translation unavailable — install deep-translator)"
     try:
         # Strip low-conf markers, line separators, and extra whitespace
@@ -395,9 +402,12 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
     """
     Run the full segment → OCR → Devanagari → translate pipeline
     on a region (already cropped by the user or the full image).
+
+    Always returns a 6-tuple:
+      (status, full_deva, concat_deva, iast_str, translation, debug_img)
     """
-    if not HAS_SEGMENT or not HAS_RECOGNIZE:
-        return "❌ segment.py / recognize.py not found in transliteration/", "", "", "", None
+    if not HAS_SEGMENT or not HAS_RECOGNIZE or segment_page is None or recognize_segments is None:
+        return "❌ segment.py / recognize.py not found in transliteration/", "", "", "", "(unavailable)", None
 
     tmp_dir = tempfile.mkdtemp(prefix="newa_seg_")
     tmp_img = os.path.join(tmp_dir, "input.png")
@@ -424,7 +434,7 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
         )
 
         if not char_list:
-            return "❌ No characters found after segmentation.", "", "", "", None
+            return "❌ No characters found after segmentation.", "", "", "", "(nothing to translate)", None
 
         # ── 2b. Post-process: attractor bias + sequence repair ──────
         char_list = _postprocess(char_list, global_threshold=min_conf)
@@ -537,7 +547,7 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
 
     except Exception as e:
         import traceback
-        return f"❌ Error: {e}\n{traceback.format_exc()}", "", "", "", None
+        return f"❌ Error: {e}\n{traceback.format_exc()}", "", "", "", "", None
 
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -574,16 +584,11 @@ def process_line_mode(editor_value, min_conf, do_translate):
     if img_arr is None:
         return "❌ No image provided.", "", "", "", "(no translation)", None
 
-    result = ocr_region(img_arr, float(min_conf), bool(do_translate))
-
-    # ocr_region returns 6 values; map them to our outputs
-    if len(result) == 6:
-        status, per_line, full_deva, iast, translation, debug_img = result
-    else:
-        # Error path
-        status = result[0]
-        per_line = full_deva = iast = translation = ""
-        debug_img = None
+    # ocr_region always returns a 6-tuple:
+    # (status, full_deva, concat_deva, iast_str, translation, debug_img)
+    status, per_line, full_deva, iast, translation, debug_img = ocr_region(
+        img_arr, float(min_conf), bool(do_translate)
+    )
 
     return status, per_line, full_deva, iast, translation, debug_img
 

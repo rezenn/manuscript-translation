@@ -17,6 +17,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -31,33 +32,35 @@ from model import build_model
 # ══════════════════════════════════════════════════════════════════
 # PER-CLASS CONFIDENCE THRESHOLDS
 # ══════════════════════════════════════════════════════════════════
-# Classes whose F1 < 0.95 on test set get a stricter threshold.
-# A prediction is only accepted if confidence >= the class threshold.
-# Otherwise it is flagged as low_conf (shown as ⟨?⟩ in output).
-#
-# Values derived from test metrics — threshold = max(global_threshold,
-# 0.95) for the weak class set.  This is documented in the thesis as
-# "per-class confidence gating based on empirical F1 scores."
+# These classes scored slightly lower F1 on the test set (see
+# eval_results/metrics_test.json -> weakest_classes), so they get a
+# slightly higher per-class floor than weaker/default classes -- but
+# still well within the normal confidence range models actually
+# produce on manuscript crops (40-70%). The previous version of this
+# table hardcoded every entry to 0.95, which is *above* every one of
+# these classes' real F1 score, so max(per, global_threshold) always
+# selected 0.95 and rejected nearly every common consonant
+# prediction as low-confidence (shown as ⟨?⟩), corrupting line text
+# and breaking translation. Threshold = global_threshold for any
+# class not listed; per-class floor only raises the bar slightly for
+# classes in this table.
 
-PER_CLASS_THRESHOLD: dict = {
-    # F1 < 0.89
-    "wa":      0.95,
-    "ya":      0.95,
-    # F1 0.89–0.93
-    "ba":      0.95,
-    "dda":     0.95,
-    "da":      0.95,
-    "kha":     0.95,
-    "vowel_U": 0.95,
-    "virama":  0.95,
-    "pa":      0.95,
-    # F1 0.93–0.945
-    "digit_2": 0.95,
-    "matra_uu":0.95,
-    "ka":      0.95,
-    "tha":     0.95,
-    "digit_3": 0.95,
-    "matra_u": 0.95,
+PER_CLASS_THRESHOLD: Dict[str, float] = {
+    "wa":       0.55,   # F1=0.886
+    "ya":       0.52,   # F1=0.907
+    "ba":       0.50,   # F1=0.912
+    "da":       0.50,   # F1=0.915
+    "dda":      0.50,   # F1=0.916
+    "kha":      0.55,   # F1=0.921 (attractor)
+    "vowel_U":  0.50,   # F1=0.923
+    "virama":   0.52,   # F1=0.924
+    "pa":       0.48,   # F1=0.929
+    "digit_2":  0.48,   # F1=0.929
+    "matra_uu": 0.48,   # F1=0.930
+    "ka":       0.48,   # F1=0.931
+    "tha":      0.48,   # F1=0.931
+    "digit_3":  0.48,   # F1=0.933
+    "matra_u":  0.48,   # F1=0.933
 }
 
 
@@ -74,14 +77,14 @@ def is_low_conf(class_name: str, confidence: float,
     return confidence < threshold
 
 class CharacterCropDataset(Dataset):
-    def __init__(self, image_paths: list, img_size: int = 64):
+    def __init__(self, image_paths: List[str], img_size: int = 64) -> None:
         self.paths    = image_paths
         self.img_size = img_size
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.paths)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> torch.Tensor:
         path = self.paths[idx]
         img  = cv2.imread(str(path), cv2.IMREAD_GRAYSCALE)
 
@@ -116,7 +119,10 @@ class CharacterCropDataset(Dataset):
 # LOAD MODEL
 # ══════════════════════════════════════════════════════════════════
 
-def load_model(checkpoint_path: str, device: torch.device):
+def load_model(
+    checkpoint_path: str,
+    device: torch.device,
+) -> Tuple[torch.nn.Module, Dict[int, str], int]:
     """
     Load trained model from checkpoint.
     Handles both {int: name} and {name: int} class_map formats.
@@ -141,7 +147,7 @@ def load_model(checkpoint_path: str, device: torch.device):
     # Normalise class_map → {int_index: class_name}
     if not class_map:
         print("  WARNING: checkpoint has no class_map — predictions will be indices")
-        index_to_char = {}
+        index_to_char: Dict[int, str] = {}
     else:
         first_key = next(iter(class_map))
         if isinstance(first_key, str) and not first_key.isdigit():
@@ -151,7 +157,7 @@ def load_model(checkpoint_path: str, device: torch.device):
             # Format: {"0": "ka", ...} or {0: "ka", ...}
             index_to_char = {int(k): v for k, v in class_map.items()}
 
-    return model, index_to_char, img_size
+    return model, index_to_char, int(img_size)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -159,14 +165,14 @@ def load_model(checkpoint_path: str, device: torch.device):
 # ══════════════════════════════════════════════════════════════════
 
 def recognize_batch(
-    image_paths: list,
+    image_paths: List[str],
     model: torch.nn.Module,
-    index_to_char: dict,
+    index_to_char: Dict[int, str],
     img_size: int,
     device: torch.device,
     batch_size: int = 32,
     confidence_threshold: float = 0.25,
-) -> list:
+) -> List[dict]:
     """
     Run model on all images. Returns list of prediction dicts.
     """
@@ -174,7 +180,7 @@ def recognize_batch(
     loader  = DataLoader(dataset, batch_size=batch_size,
                          shuffle=False, num_workers=0)
 
-    results = []
+    results: List[dict] = []
     img_idx = 0
 
     print(f"  Running OCR on {len(image_paths)} characters...")
@@ -190,9 +196,11 @@ def recognize_batch(
 
             for i in range(batch.size(0)):
                 path  = image_paths[img_idx]
-                top5  = [
-                    (index_to_char.get(top_idx[i][j].item(), f"cls_{top_idx[i][j].item()}"),
-                     round(top_probs[i][j].item(), 4))
+                # FIX: cast .item() result to int so Dict[int,str].get() works
+                top5: List[Tuple[str, float]] = [
+                    (index_to_char.get(int(top_idx[i][j].item()),
+                                       f"cls_{int(top_idx[i][j].item())}"),
+                     round(float(top_probs[i][j].item()), 4))
                     for j in range(k)
                 ]
                 best_char = top5[0][0]
@@ -222,10 +230,10 @@ def recognize_batch(
 def recognize_segments(
     segments_dir: str,
     checkpoint_path: str,
-    output_json: str         = None,
-    batch_size: int          = 32,
+    output_json: Optional[str] = None,   # FIX: was str = None
+    batch_size: int = 32,
     confidence_threshold: float = 0.25,
-) -> list:
+) -> List[dict]:
     """
     Recognize all crops in segments_dir.
     Reads segments_meta.json, adds predictions, writes it back out.
@@ -249,24 +257,27 @@ def recognize_segments(
     seg_path  = Path(segments_dir)
     meta_path = seg_path / "segments_meta.json"
 
+    meta: Optional[dict] = None
     if meta_path.exists():
         with open(meta_path, encoding="utf-8") as f:
-            meta = json.load(f)
-        char_list = sorted(meta["characters"],
-                           key=lambda c: (c["line"], c["char_idx"]))
+            loaded: dict = json.load(f)
+        meta = loaded
+        char_list: List[dict] = sorted(
+            loaded["characters"],
+            key=lambda c: (c["line"], c["char_idx"]),
+        )
     else:
         found = sorted(seg_path.glob("line_*_char_*.png"))
         char_list = [{"file": p.name, "line": 0, "char_idx": i}
                      for i, p in enumerate(found)]
-        meta = None
 
     if not char_list:
         print(f"  ERROR: No character crops in {segments_dir}")
         return []
 
-    image_paths  = []
-    valid_chars  = []   # chars that need CNN inference
-    space_chars  = []   # synthetic space entries (no inference needed)
+    image_paths: List[str]  = []
+    valid_chars: List[dict] = []   # chars that need CNN inference
+    space_chars: List[dict] = []   # synthetic space entries (no inference needed)
 
     for c in char_list:
         if c.get("file") == "__space__" or c.get("predicted") == "space":
@@ -299,8 +310,8 @@ def recognize_segments(
     all_chars = valid_chars + space_chars
     all_chars.sort(key=lambda c: (c.get("line", 0), c.get("char_idx", 0)))
 
-    out_path  = output_json or str(meta_path)
-    save_data = meta or {
+    out_path = output_json if output_json is not None else str(meta_path)
+    save_data: dict = meta if meta is not None else {
         "source_image": str(segments_dir),
         "num_lines":    max((c["line"] for c in all_chars), default=0) + 1,
         "num_chars":    len(all_chars),
@@ -317,7 +328,10 @@ def recognize_segments(
 # SINGLE IMAGE — direct inference (no segmentation pipeline)
 # ══════════════════════════════════════════════════════════════════
 
-def recognize_single(image_path: str, checkpoint_path: str):
+def recognize_single(
+    image_path: str,
+    checkpoint_path: str,
+) -> Optional[dict]:
     """
     Directly recognize ONE character image.
     Applies tight-crop + auto-invert preprocessing — same as app.py.
@@ -362,9 +376,11 @@ def recognize_single(image_path: str, checkpoint_path: str):
         k      = min(5, probs.shape[1])
         top_probs, top_idx = probs.topk(k, dim=1)
 
-    top5 = [
-        (index_to_char.get(top_idx[0][j].item(), f"cls_{top_idx[0][j].item()}"),
-         top_probs[0][j].item())
+    # FIX: cast tensor index to int before using as dict key
+    top5: List[Tuple[str, float]] = [
+        (index_to_char.get(int(top_idx[0][j].item()),
+                           f"cls_{int(top_idx[0][j].item())}"),
+         float(top_probs[0][j].item()))
         for j in range(k)
     ]
 
@@ -393,7 +409,7 @@ def recognize_single(image_path: str, checkpoint_path: str):
 # CLI
 # ══════════════════════════════════════════════════════════════════
 
-def parse_args():
+def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Newa OCR recognition v3")
     p.add_argument("--segments",     help="Segments directory from segment.py")
     p.add_argument("--image",        help="Single crop image (direct inference)")

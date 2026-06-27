@@ -2,5 +2,8 @@
   "venvPath": ".",
   "venv": "new_env",
   "pythonVersion": "3.10",
-  "extraPaths": ["ocr_model", "transliteration"]
+  "extraPaths": ["ocr_model", "transliteration"],
+  "reportMissingImports": "warning",
+  "reportMissingModuleSource": "none",
+  "typeCheckingMode": "basic"
 }

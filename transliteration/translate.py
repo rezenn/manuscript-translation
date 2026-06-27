@@ -36,12 +36,15 @@ try:
     from newa_to_devanagari import to_devanagari, to_iast
     HAS_DEVA_MODULE = True
 except ImportError:
+    to_devanagari = None
+    to_iast = None
     HAS_DEVA_MODULE = False
 
 try:
     from deep_translator import GoogleTranslator
     HAS_TRANSLATE = True
 except ImportError:
+    GoogleTranslator = None
     HAS_TRANSLATE = False
 
 
@@ -94,7 +97,7 @@ IAST_MAP = {
 
 def char_to_deva(name: str) -> str:
     """4-step lookup: module → as-is → lowercase → stripped."""
-    if HAS_DEVA_MODULE:
+    if HAS_DEVA_MODULE and to_devanagari is not None:
         try:
             return to_devanagari(name)
         except Exception:
@@ -106,7 +109,7 @@ def char_to_deva(name: str) -> str:
 
 
 def char_to_iast(name: str) -> str:
-    if HAS_DEVA_MODULE:
+    if HAS_DEVA_MODULE and to_iast is not None:
         try:
             return to_iast(name)
         except Exception:
@@ -157,7 +160,7 @@ def run_full(args):
         segment_page(
             image_path=str(image_path),
             output_dir=seg_dir,
-            seg_threshold=args.seg_threshold,
+            valley_threshold=args.seg_threshold,
         )
 
         # ── 2. OCR ─────────────────────────────────────────────────
@@ -225,7 +228,7 @@ def run_full(args):
         translation = ""
         if args.translate:
             print("\n[4/4] Translating via Google Translate (free)...\n")
-            if HAS_TRANSLATE:
+            if HAS_TRANSLATE and GoogleTranslator is not None:
                 try:
                     clean = concat_for_translate.replace("⟨?⟩", "").strip()
                     if clean:

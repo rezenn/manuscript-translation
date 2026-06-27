@@ -43,6 +43,7 @@ Run:
 import argparse
 import json
 from pathlib import Path
+from typing import List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -65,9 +66,16 @@ def make_binary(img: np.ndarray) -> np.ndarray:
     """
     # 1. Suppress red/orange pixels via HSV mask
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    red_mask1   = cv2.inRange(hsv, (0,   80,  60), (15,  255, 255))
-    red_mask2   = cv2.inRange(hsv, (160, 80,  60), (180, 255, 255))
-    orange_mask = cv2.inRange(hsv, (8,   60,  60), (25,  255, 255))
+    # FIX: cv2.inRange needs np.array, not plain Python tuples
+    red_mask1   = cv2.inRange(hsv,
+                              np.array([0,   80,  60], dtype=np.uint8),
+                              np.array([15,  255, 255], dtype=np.uint8))
+    red_mask2   = cv2.inRange(hsv,
+                              np.array([160, 80,  60], dtype=np.uint8),
+                              np.array([180, 255, 255], dtype=np.uint8))
+    orange_mask = cv2.inRange(hsv,
+                              np.array([8,   60,  60], dtype=np.uint8),
+                              np.array([25,  255, 255], dtype=np.uint8))
     red_mask = cv2.bitwise_or(cv2.bitwise_or(red_mask1, red_mask2), orange_mask)
     k_red = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
     red_mask = cv2.dilate(red_mask, k_red, iterations=1)
@@ -283,9 +291,11 @@ def find_panel_splits(binary: np.ndarray,
 # STEP 4 — FIND TEXT LINES WITHIN A PANEL (VALLEY-BASED)
 # ══════════════════════════════════════════════════════════════════
 
-def find_text_lines_in_panel(binary_panel: np.ndarray,
-                              min_line_height: int = 15,
-                              valley_threshold: float = None) -> list:
+def find_text_lines_in_panel(
+    binary_panel: np.ndarray,
+    min_line_height: int = 15,
+    valley_threshold: Optional[float] = None,   # FIX: was float = None
+) -> List[Tuple[int, int]]:
     """Find text line extents via valley detection. Auto-tunes threshold."""
     h = binary_panel.shape[0]
     row_ink = binary_panel.sum(axis=1).astype(float)
@@ -297,9 +307,10 @@ def find_text_lines_in_panel(binary_panel: np.ndarray,
         sorted_ink = np.sort(row_ink)
         n_valley = max(1, int(h * 0.25))
         median_valley = float(sorted_ink[n_valley // 2])
-        valley_threshold = median_valley / max_ink
-        valley_threshold = max(0.08, min(0.30, valley_threshold))
-        print(f"    Auto valley threshold: {valley_threshold:.2f}")
+        auto_threshold = median_valley / max_ink
+        auto_threshold = max(0.08, min(0.30, auto_threshold))
+        print(f"    Auto valley threshold: {auto_threshold:.2f}")
+        valley_threshold = auto_threshold
 
     thresh_val = max_ink * valley_threshold
 
@@ -307,7 +318,7 @@ def find_text_lines_in_panel(binary_panel: np.ndarray,
     smooth_ink = np.convolve(row_ink, kernel, mode='same')
     is_valley = smooth_ink < thresh_val
 
-    raw_lines = []
+    raw_lines: List[List[int]] = []
     in_text, start = False, 0
     for i in range(h):
         if not is_valley[i] and not in_text:
@@ -319,7 +330,7 @@ def find_text_lines_in_panel(binary_panel: np.ndarray,
     if in_text and (h - start) >= min_line_height:
         raw_lines.append([start, h])
 
-    merged = []
+    merged: List[List[int]] = []
     for seg in raw_lines:
         if merged and seg[0] - merged[-1][1] <= 3:
             merged[-1][1] = seg[1]
@@ -452,7 +463,10 @@ def inject_spaces(boxes: list, char_meta_list: list) -> list:
 # STEP 6 — MERGE DIACRITICS
 # ══════════════════════════════════════════════════════════════════
 
-def merge_diacritics(boxes: list, line_height: int = None) -> list:
+def merge_diacritics(
+    boxes: List[Tuple[int, int, int, int]],
+    line_height: Optional[int] = None,   # FIX: was int = None
+) -> List[Tuple[int, int, int, int]]:
     """Merge small diacritic blobs into their base character."""
     if len(boxes) < 2:
         return boxes
@@ -467,13 +481,14 @@ def merge_diacritics(boxes: list, line_height: int = None) -> list:
     if not diacritics:
         return boxes
 
-    merged = {bi: list(bb) for bi, (_, bb) in enumerate(bases)}
-    merged_set = set()
+    merged: dict = {bi: list(bb) for bi, (_, bb) in enumerate(bases)}
+    merged_set: set = set()
 
     for di, (_, db) in enumerate(diacritics):
         dx, dy, dw, dh = db
         cx = dx + dw / 2
-        best_bi, best_ov = None, -1
+        best_bi: Optional[int] = None
+        best_ov = -1.0
         for bi, (_, bb) in enumerate(bases):
             bx, by, bw, bh = bb
             margin = bw * 0.30
@@ -491,7 +506,7 @@ def merge_diacritics(boxes: list, line_height: int = None) -> list:
             ]
             merged_set.add(di)
 
-    final = [tuple(v) for v in merged.values()]
+    final: List[Tuple[int, int, int, int]] = [tuple(v) for v in merged.values()]  # type: ignore[misc]
     min_orphan_area = median_h * 5
     for i, (_, db) in enumerate(diacritics):
         if i not in merged_set:
@@ -628,14 +643,16 @@ def save_debug_image(img: np.ndarray, panels: list,
 # MAIN PIPELINE
 # ══════════════════════════════════════════════════════════════════
 
-def segment_page(image_path: str,
-                 output_dir: str          = "output_segments",
-                 target_size: int         = 64,
-                 debug: bool              = False,
-                 min_line_height: int     = 15,
-                 valley_threshold: float  = None,
-                 min_upscale_height: int  = 600,
-                 min_panel_gap: int       = 30) -> list:
+def segment_page(
+    image_path: str,
+    output_dir: str                = "output_segments",
+    target_size: int               = 64,
+    debug: bool                    = False,
+    min_line_height: int           = 15,
+    valley_threshold: Optional[float] = None,
+    min_upscale_height: int        = 600,
+    min_panel_gap: int             = 30,
+) -> List[dict]:
     """
     Full segmentation pipeline.
 
@@ -722,8 +739,8 @@ def segment_page(image_path: str,
 # CLI
 # ══════════════════════════════════════════════════════════════════
 
-def parse_args():
-    p = argparse.ArgumentParser(description="Newa manuscript segmenter v5")
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Newa manuscript segmenter v6")
     p.add_argument("--image",     required=True)
     p.add_argument("--output",    default="output_segments")
     p.add_argument("--size",      type=int,   default=64)
