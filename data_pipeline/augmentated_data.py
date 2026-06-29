@@ -1,4 +1,3 @@
-
 import cv2
 import numpy as np
 import os
@@ -13,15 +12,24 @@ setup_utf8()
 sys.path.insert(0, os.path.dirname(__file__))
 
 # ── Augmentation jobs ─────────────────────────────────────────────
-# (source_dir, output_dir, pipeline_name, augments_per_image)
+# (source_dir, output_dir, pipeline_name, augments_per_image, skip_perspective_elastic)
 JOBS = [
     ("dataset_raw/synthetic_noto",
      "dataset_raw/augmented_noto",
-     "noto", 60),
+     "noto", 60, False),
     ("dataset_raw/synthetic_ranjana",
      "dataset_raw/augmented_ranjana",
-     "ranjana", 80),
-  
+     "ranjana", 80, False),
+
+    # Consonant+matra compound classes (e.g. 'ma_aa' = म+ा fused).
+    # CRITICAL FIX: skip_perspective_elastic=True. These transforms
+    # with white padding break the bond between the consonant and matra.
+    ("dataset_raw/synthetic_compound_noto",
+     "dataset_raw/augmented_compound_noto",
+     "noto", 60, True),
+    ("dataset_raw/synthetic_compound_ranjana",
+     "dataset_raw/augmented_compound_ranjana",
+     "ranjana", 80, True),
 ]
 
 
@@ -33,6 +41,8 @@ def aug_rotate(img, limit=12):
     angle = np.random.uniform(-limit, limit)
     h, w  = img.shape
     M     = cv2.getRotationMatrix2D((w/2, h/2), angle, 1.0)
+    # We keep borderValue=255 here because rotation with black padding
+    # would leave black corners. Rotating doesn't un-fuse shapes.
     return cv2.warpAffine(img, M, (w, h), borderValue=255)
 
 
@@ -45,7 +55,7 @@ def aug_shear(img, shear_range=0.15):
     """Simulates calligraphic slant."""
     h, w = img.shape
     shear = np.random.uniform(-shear_range, shear_range)
-    M = np.float32([[1, shear, 0], [0, 1, 0]])
+    M = np.array([[1, shear, 0], [0, 1, 0]], dtype=np.float32)
     return cv2.warpAffine(img, M, (w, h), borderValue=255)
 
 
@@ -60,7 +70,6 @@ def aug_ink_bleed(img):
     """Simulates ink spreading into manuscript paper."""
     k = np.random.choice([3, 5])
     blurred = cv2.GaussianBlur(img, (k, k), 0)
-    # Dilate dark pixels (ink spreads)
     kernel   = np.ones((2, 2), np.uint8)
     inv      = cv2.bitwise_not(blurred)
     dilated  = cv2.dilate(inv, kernel, iterations=1)
@@ -88,16 +97,17 @@ def aug_brightness_dark(img):
     return aug_brightness(img, low=0.55, high=0.95)
 
 
+# ⚠ CRITICAL FIX: These two functions cause un-fusing on compounds!
 def aug_perspective(img, strength=0.06):
     h, w = img.shape
     m    = int(w * strength)
-    src  = np.float32([[0,0],[w,0],[0,h],[w,h]])
-    dst  = np.float32([
+    src  = np.array([[0, 0], [w, 0], [0, h], [w, h]], dtype=np.float32)
+    dst  = np.array([
         [np.random.randint(0, m+1), np.random.randint(0, m+1)],
         [w-np.random.randint(0,m+1), np.random.randint(0,m+1)],
         [np.random.randint(0, m+1), h-np.random.randint(0,m+1)],
         [w-np.random.randint(0,m+1), h-np.random.randint(0,m+1)],
-    ])
+    ], dtype=np.float32)
     M = cv2.getPerspectiveTransform(src, dst)
     return cv2.warpPerspective(img, M, (w, h), borderValue=255)
 
@@ -157,20 +167,52 @@ RANJANA_PIPELINE = [
     aug_scale,
 ]
 
+# NEW: Pipeline without destructive transforms for compounds
+NOTO_COMPOUND_PIPELINE = [
+    aug_rotate,
+    aug_blur,
+    aug_noise,
+    aug_brightness,
+    aug_scale,
+]
+
+RANJANA_COMPOUND_PIPELINE = [
+    aug_rotate_manuscript,
+    aug_shear,
+    aug_ink_bleed,
+    aug_noise_heavy,
+    aug_brightness_dark,
+    aug_scale,
+]
+
 PIPELINES = {
     "noto":    NOTO_PIPELINE,
     "ranjana": RANJANA_PIPELINE,
+    "noto_compound": NOTO_COMPOUND_PIPELINE,
+    "ranjana_compound": RANJANA_COMPOUND_PIPELINE,
 }
 
 
-def augment_one(img, pipeline):
+def augment_one(img, pipeline, skip_perspective_elastic=False):
     """Apply 2–4 random augmentations from pipeline."""
-    n_aug  = np.random.randint(2, min(5, len(pipeline)+1))
-    chosen = np.random.choice(len(pipeline),
+    # Filter out the destructive transforms if flagged
+    if skip_perspective_elastic:
+        filtered_pipeline = [
+            fn for fn in pipeline 
+            if fn not in [aug_perspective, aug_elastic]
+        ]
+    else:
+        filtered_pipeline = pipeline
+
+    if not filtered_pipeline:
+        return img
+
+    n_aug  = np.random.randint(2, min(5, len(filtered_pipeline)+1))
+    chosen = np.random.choice(len(filtered_pipeline),
                               size=n_aug, replace=False)
     result = img.copy()
     for idx in chosen:
-        result = pipeline[idx](result)
+        result = filtered_pipeline[idx](result)
     return result
 
 
@@ -183,17 +225,23 @@ def is_blank(img, threshold=250, min_dark=8):
 # ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print("=" * 60)
-    print("STEP 3 — AUGMENTATION")
+    print("STEP 3 — AUGMENTATION (COMPOUND FIX APPLIED)")
     print("=" * 60)
 
-    for src_dir, out_dir, pipeline_name, n_aug in JOBS:
+    for src_dir, out_dir, pipeline_name, n_aug, skip_destructive in JOBS:
         print(f"\n[{pipeline_name}]  {src_dir} → {out_dir}")
 
         if not os.path.exists(src_dir):
             print(f"  ✗ Source not found — run step2 first")
             continue
 
-        pipeline = PIPELINES[pipeline_name]
+        # Determine correct pipeline
+        if skip_destructive:
+            pipeline = PIPELINES[f"{pipeline_name}_compound"]
+            print("  * Using safe compound pipeline (no perspective/elastic)")
+        else:
+            pipeline = PIPELINES[pipeline_name]
+
         os.makedirs(out_dir, exist_ok=True)
 
         classes = [c for c in os.listdir(src_dir)
@@ -236,7 +284,7 @@ if __name__ == "__main__":
                     if img is None:
                         continue
 
-                    aug = augment_one(img, pipeline)
+                    aug = augment_one(img, pipeline, skip_destructive)
 
                     if not is_blank(aug):
                         cv2.imwrite(
@@ -252,5 +300,4 @@ if __name__ == "__main__":
 
     print(f"\n{'='*60}")
     print("Augmentation complete.")
-    print("Check dataset_raw/augmented_noto/")
-    print("Check dataset_raw/augmented_ranjana/")
+    print("Compound glyphs are now preserved correctly.")

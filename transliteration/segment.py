@@ -412,6 +412,180 @@ def find_characters_in_line(binary_line: np.ndarray,
     return boxes
 
 
+# ══════════════════════════════════════════════════════════════════
+# STEP 5b — SPLIT FUSED MULTI-CHARACTER BLOBS (WORD-FUSION FIX)
+# ══════════════════════════════════════════════════════════════════
+#
+# PROBLEM
+# -------
+# In this calligraphic Ranjana/Prachalit-style font, characters within
+# a word can touch or overlap with literally zero white-pixel gap
+# between them (no shirorekha/head-bar is involved — the letterforms
+# themselves overlap). Connected-component labelling treats the whole
+# word as a single blob, which then gets resized to 64x64 and fed to
+# a classifier trained on single-character crops. The model has no
+# class for "4 characters at once", so it guesses -- and tends to
+# guess visually generic "blob with a loop" shapes (na/nna/ga/kha),
+# which is exactly the ण/ग flooding seen on real manuscript photos.
+#
+# FIX
+# ---
+# For any connected-component box much wider than the line's typical
+# single-character width, find the SINGLE deepest + widest valley in
+# its vertical ink-column profile and cut there, then recurse into
+# each half. Only one cut is taken per call (not every valley above
+# a relative threshold) because this calligraphic font's strokes taper
+# in thickness *within* a single glyph -- a naive "every dip counts"
+# approach mistakes those tapers for character gaps and shreds a
+# single letter into unrecognizable slivers. Picking only the
+# widest/deepest dip is far more likely to land on a genuine
+# inter-character gap rather than a stroke taper.
+#
+# This is a heuristic, validated against real manuscript crops, but
+# not guaranteed perfect on every conjunct cluster (e.g. ब्बु commonly
+# stays one piece, which is usually fine since virama-joined conjuncts
+# are often best recognized as a unit anyway). It reliably resolves
+# the common case of the *first* character splitting cleanly off a
+# fused word; deeper recursion past that point is intentionally
+# conservative to avoid producing garbage fragments.
+
+def _find_best_valley(col_ink: np.ndarray, min_margin: int) -> Optional[Tuple[int, int]]:
+    """
+    Find the single most likely inter-character gap in a column-ink
+    profile: the widest contiguous run of columns falling below a
+    fraction of the local max, scanning from strict (12%) to lenient
+    (45%) and stopping at the first threshold that finds any interior
+    candidate. Returns (start, end) of that run, or None.
+
+    Starting strict and widening only if nothing is found keeps this
+    from latching onto shallow stroke-thickness tapers when a real,
+    much deeper gap exists elsewhere in the same box.
+    """
+    n = len(col_ink)
+    if n < min_margin * 2:
+        return None
+
+    kernel_size = max(3, n // 60)
+    kernel = np.ones(kernel_size) / kernel_size
+    smooth = np.convolve(col_ink, kernel, mode='same')
+    mx = smooth.max()
+    if mx == 0:
+        return None
+
+    frac = smooth / mx
+    for frac_thresh in (0.12, 0.18, 0.25, 0.35, 0.45):
+        below = frac < frac_thresh
+        runs = []
+        in_run, start = False, 0
+        for i in range(n):
+            if below[i] and not in_run:
+                in_run, start = True, i
+            elif not below[i] and in_run:
+                in_run = False
+                runs.append((start, i))
+        if in_run:
+            runs.append((start, n))
+
+        candidates = [(s, e) for s, e in runs if s > min_margin and e < n - min_margin]
+        if candidates:
+            return max(candidates, key=lambda se: se[1] - se[0])
+    return None
+
+
+def _split_box_recursive(
+    binary_line: np.ndarray,
+    x: int, y: int, w: int, h: int,
+    expected_char_width: float,
+    min_split_width: int,
+    width_ratio_trigger: float,
+    max_depth: int,
+    depth: int = 0,
+) -> list:
+    """Recursively bisect one box at its single best valley. Returns [(x, w), ...]."""
+    if w <= expected_char_width * width_ratio_trigger or depth > max_depth:
+        return [(x, w)]
+
+    sub = binary_line[y:y + h, x:x + w]
+    col_ink = sub.sum(axis=0).astype(float)
+
+    valley = _find_best_valley(col_ink, min_margin=min_split_width)
+    if valley is None:
+        return [(x, w)]
+
+    s, e = valley
+    cut = (s + e) // 2
+    left_w, right_w = cut, w - cut
+    if left_w < min_split_width or right_w < min_split_width:
+        return [(x, w)]   # cut would leave a sliver -- not a real boundary
+
+    left  = _split_box_recursive(binary_line, x,       y, left_w,  h,
+                                  expected_char_width, min_split_width,
+                                  width_ratio_trigger, max_depth, depth + 1)
+    right = _split_box_recursive(binary_line, x + cut, y, right_w, h,
+                                  expected_char_width, min_split_width,
+                                  width_ratio_trigger, max_depth, depth + 1)
+    return left + right
+
+
+def split_fused_characters(
+    binary_line: np.ndarray,
+    boxes: list,
+    min_split_width: int = 45,
+    width_ratio_trigger: float = 1.35,
+    max_depth: int = 4,
+) -> list:
+    """
+    Given the connected-component boxes for one line, split any box that
+    is much wider than the line's typical single-character width by
+    cutting at its single best (deepest + widest) internal ink valley,
+    recursing into each half in case more than one extra character is
+    fused in.
+
+    width_ratio_trigger : a box must be at least this many times the
+        line's median box width before a split is even attempted. Kept
+        conservative (1.35x) -- a too-low value risks shredding a
+        legitimately wide single character (e.g. a consonant + vowel
+        matra combination) into bogus fragments, which is worse than
+        leaving an occasional fused pair untouched.
+    min_split_width : minimum pixel width for any resulting sub-box;
+        a candidate cut is rejected outright if either side would be
+        narrower than this (almost always a stroke-taper artifact,
+        not a real character boundary).
+    max_depth : recursion limit per box, so a stubborn multi-character
+        blob can be cut more than once without an unbounded search.
+
+    Boxes that are already narrow (≈ single character) are returned
+    unchanged. Falls back safely to the original box whenever no
+    confident internal valley is found, so this never *drops* ink --
+    only refines boundaries it's reasonably sure about.
+    """
+    if len(boxes) < 2:
+        return boxes
+
+    widths = [b[2] for b in boxes]
+    expected_char_width = float(np.median(widths))
+    if expected_char_width <= 0:
+        return boxes
+
+    out_boxes = []
+    for (x, y, w, h) in boxes:
+        rel_pieces = _split_box_recursive(
+            binary_line, x, y, w, h,
+            expected_char_width, min_split_width,
+            width_ratio_trigger, max_depth,
+        )
+        if len(rel_pieces) < 2:
+            out_boxes.append((x, y, w, h))
+            continue
+        for piece_x, piece_w in rel_pieces:
+            out_boxes.append((piece_x, y, piece_w, h))
+
+    out_boxes.sort(key=lambda b: b[0])
+    return out_boxes
+
+
+
+
 def inject_spaces(boxes: list, char_meta_list: list) -> list:
     """
     Given sorted character boxes and their metadata dicts, insert synthetic
@@ -559,6 +733,7 @@ def crop_and_save(img: np.ndarray,
             line_h    = line_bot - line_top
 
             boxes = find_characters_in_line(line_bin)
+            boxes = split_fused_characters(line_bin, boxes)
             boxes = merge_diacritics(boxes, line_height=line_h)
             boxes = [(x, y, w, h) for x, y, w, h in boxes if h <= line_h * 1.5]
 

@@ -5,6 +5,7 @@ new_env/
 character_sheets/
 debug_crops/
 handwritten_dataset/
+google_vision_fallback.py
 
 
 __pycache__/

@@ -1,4 +1,3 @@
-
 import os, sys, shutil, random
 from tqdm import tqdm
 from collections import defaultdict
@@ -18,6 +17,13 @@ SOURCES = [
     ("dataset_raw/augmented_ranjana",        2.0),
     ("dataset_raw/handwritten_dataset",      3.0),
     ("dataset_raw/augmented_manuscript",         3.0),
+
+    # Consonant+matra compound classes (e.g. 'ma_aa' = म+ा fused).
+    # See generate_compound_classes.py for why these exist: without
+    # them the model never sees a matra attached to its consonant,
+    # only bare consonants and bare matras in isolation.
+    ("dataset_raw/augmented_compound_noto",     1.5),
+    ("dataset_raw/augmented_compound_ranjana",  2.0),
 ]
 
 OUTPUT  = "dataset_final"

@@ -141,6 +141,49 @@ ALIASES.update({
 # LOOKUP FUNCTION
 # ══════════════════════════════════════════════════════════════════
 
+# ── Compound class support (consonant + matra, e.g. 'ma_aa') ───────
+# generate_compound_classes.py creates classes named '{consonant}_{suf}'
+# (e.g. 'ma_aa', 'ka_i', 'ga_uu') for every consonant+matra pair, so the
+# model can recognize a fused glyph as one unit instead of guessing.
+# These aren't in CHAR_MAP directly (there are 297 of them) -- instead
+# we recognize the naming pattern and combine the two known pieces.
+MATRA_SUFFIX_TO_CLASS = {
+    "aa": "matra_aa", "i": "matra_i", "ii": "matra_ii",
+    "u": "matra_u", "uu": "matra_uu", "e": "matra_e",
+    "ai": "matra_ai", "o": "matra_o", "au": "matra_au",
+}
+
+_CONSONANT_NAMES = {
+    "ka", "kha", "ga", "gha", "nga", "ca", "cha", "ja", "jha", "nya",
+    "tta", "ttha", "dda", "ddha", "nna", "ta", "tha", "da", "dha", "na",
+    "pa", "pha", "ba", "bha", "ma", "ya", "ra", "la", "wa", "sha",
+    "ssa", "sa", "ha",
+}
+
+
+def _try_compound(name: str) -> dict | None:
+    """
+    If `name` looks like '{consonant}_{matra_suffix}' (e.g. 'ma_aa'),
+    return its combined Devanagari/IAST info. Otherwise return None.
+    """
+    if "_" not in name:
+        return None
+    cons, _, suf = name.partition("_")
+    if cons not in _CONSONANT_NAMES:
+        return None
+    matra_class = MATRA_SUFFIX_TO_CLASS.get(suf)
+    if matra_class is None:
+        return None
+    cons_info = CHAR_MAP.get(cons)
+    matra_info = CHAR_MAP.get(matra_class)
+    if cons_info is None or matra_info is None:
+        return None
+    return {
+        "deva": cons_info["deva"] + matra_info["deva"],
+        "iast": cons_info["iast"].rstrip("a") + matra_info["iast"],
+    }
+
+
 def get_char_info(class_name: str) -> dict:
     """
     Look up a class name and return its Devanagari/IAST info.
@@ -150,7 +193,8 @@ def get_char_info(class_name: str) -> dict:
       2. Lowercase match in CHAR_MAP
       3. Alias → canonical → CHAR_MAP
       4. Lowercase alias
-      5. Return placeholder  {"deva": "⟨?⟩", "iast": "[name]"}
+      5. Compound consonant+matra pattern (e.g. 'ma_aa' -> 'मा')
+      6. Return placeholder  {"deva": "⟨?⟩", "iast": "[name]"}
 
     Never raises — always returns a dict.
     """
@@ -177,7 +221,12 @@ def get_char_info(class_name: str) -> dict:
         if target in CHAR_MAP:
             return CHAR_MAP[target]
 
-    # 5. Not found
+    # 5. Compound consonant+matra class
+    compound = _try_compound(name) or _try_compound(lower)
+    if compound is not None:
+        return compound
+
+    # 6. Not found
     return {"deva": "⟨?⟩", "iast": f"[{name}]"}
 
 
