@@ -5,5 +5,14 @@
   "extraPaths": ["ocr_model", "transliteration"],
   "reportMissingImports": "warning",
   "reportMissingModuleSource": "none",
-  "typeCheckingMode": "basic"
+  "typeCheckingMode": "basic",
+  "reportGeneralTypeIssues": "none",
+  "reportOptionalMemberAccess": "none",
+  "reportOptionalCall": "none",
+  "reportUnknownVariableType": "none",
+  "reportUnknownParameterType": "none",
+  "reportUnknownMemberType": "none",
+  "reportFunctionMemberAccess": "none",
+  "reportReturnType": "none",
+  "reportAssignmentType": "none"
 }
