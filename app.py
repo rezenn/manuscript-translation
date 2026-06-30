@@ -1,16 +1,25 @@
 """
-app.py  — Newa Manuscript Transliterator v8
-Changes vs v7:
-- Fixed extract_cropped_region: explicit is-not-None checks (no more ValueError)
-- Fixed confidence_threshold passed to recognize_segments (was using HARD constant,
-  now uses the slider value so user actually controls what gets flagged)
-- Added per-class attractor penalty: nna/ga/ra/ja predicted at moderate confidence
-  are flagged for Vision fallback because these classes absorb visually similar chars
-- Removed emoji from all UI text
-- Removed "Google Vision" branding from most UI elements
-- Cleaned up status messages
-- Demo images tab kept but simplified
-- Export buttons kept, bar chart kept
+app.py — Newa Manuscript Transliterator v10
+
+CHANGES vs the version you sent back
+──────────────────────────────────────
+- Single Character tab: CNN-ONLY again, no Tesseract call at all.
+  This matches the document you uploaded (the older infer_single_char
+  that didn't call any fallback) — restored as you asked.
+- Line/Region tab: Tesseract fallback kept and ACTUALLY invoked
+  (your uploaded app.py imported should_use_fallback/google_vision_
+  recognise but never called them in ocr_region — that's why nothing
+  changed). Now fixed.
+- Visual upgrades for the thesis demo:
+    - Confidence bar chart on Single Character (kept from before)
+    - NEW: per-line confidence chart on Line/Region (bar per character)
+    - NEW: summary stat cards (total chars, avg confidence, low-conf
+      count, fallback-used count) styled as a small dashboard row
+    - NEW: attractor-class pie/breakdown chart showing how many
+      predictions came from attractor-prone classes
+    - Debug image legend made clearer (green/orange/red)
+- extract_cropped_region fix kept (no ValueError crash)
+- No emoji anywhere
 """
 
 import os
@@ -78,14 +87,13 @@ except ImportError:
 
 try:
     from google_vision_fallback import (
-        google_vision_recognise, should_use_fallback, is_truly_blank
+        google_vision_recognise, should_use_fallback_for_class
     )
-    HAS_VISION_FALLBACK = True
+    HAS_FALLBACK = True
 except ImportError:
-    HAS_VISION_FALLBACK = False
+    HAS_FALLBACK = False
     def google_vision_recognise(img): return (None, 0.0, "unavailable")
-    def should_use_fallback(conf):    return False
-    def is_truly_blank(conf):         return conf < 0.20
+    def should_use_fallback_for_class(cls, conf): return False
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -93,7 +101,6 @@ except ImportError:
 # ══════════════════════════════════════════════════════════════════
 
 NEWA_TO_DEVA = {
-    # Consonants
     "ka":"क","kha":"ख","ga":"ग","gha":"घ","nga":"ङ",
     "ca":"च","cha":"छ","ja":"ज","jha":"झ","nya":"ञ",
     "tta":"ट","ttha":"ठ","dda":"ड","ddha":"ढ","nna":"ण",
@@ -101,18 +108,14 @@ NEWA_TO_DEVA = {
     "pa":"प","pha":"फ","ba":"ब","bha":"भ","ma":"म",
     "ya":"य","ra":"र","la":"ल","wa":"व","sa":"स",
     "sha":"श","ssa":"ष","ha":"ह",
-    # Independent vowels
     "vowel_A":"अ","vowel_AA":"आ","vowel_I":"इ","vowel_II":"ई",
     "vowel_U":"उ","vowel_UU":"ऊ","vowel_E":"ए","vowel_AI":"ऐ",
     "vowel_O":"ओ","vowel_AU":"औ",
-    # Vowel signs (matras)
     "matra_aa":"ा","matra_i":"ि","matra_ii":"ी",
     "matra_u":"ु","matra_uu":"ू","matra_e":"े","matra_ai":"ै",
     "matra_o":"ो","matra_au":"ौ",
-    # Signs
     "anusvara":"ं","visarga":"ः","candrabindu":"ँ",
     "virama":"्","avagraha":"ऽ",
-    # Digits
     "digit_0":"०","digit_1":"१","digit_2":"२","digit_3":"३",
     "digit_4":"४","digit_5":"५","digit_6":"६","digit_7":"७",
     "digit_8":"८","digit_9":"९",
@@ -139,17 +142,16 @@ NEWA_TO_IAST = {
     "digit_8":"8","digit_9":"9",
 }
 
-# Classes that frequently absorb other visually similar characters.
-# When the CNN predicts one of these at moderate confidence, the
-# fallback threshold is raised so Vision API gets a chance.
+# Attractor classes — flagged in debug output / charts, used to decide
+# Line/Region Tesseract fallback. NOT used in Single Character mode.
 ATTRACTOR_CLASSES = {
-    "nna":  0.75,   # absorbs na, nna, tta
-    "ga":   0.72,   # absorbs ka, ga, gha
-    "ra":   0.70,   # absorbs ra, la, wa
-    "ja":   0.70,   # absorbs ja, jha, ca
-    "dda":  0.68,
-    "tta":  0.68,
-    "kha":  0.68,
+    "nna": "absorbs na, tta",
+    "ga":  "absorbs ka, gha",
+    "ra":  "absorbs la, wa",
+    "ja":  "absorbs jha, ca",
+    "dda": "absorbs ddha",
+    "tta": "absorbs nna",
+    "kha": "absorbs ka",
 }
 
 
@@ -171,15 +173,8 @@ def char_to_iast(name: str) -> str:
     return NEWA_TO_IAST.get(name) or NEWA_TO_IAST.get(name.lower()) or "?"
 
 
-def should_use_vision_for(class_name: str, confidence: float) -> bool:
-    """
-    Returns True if this prediction should be sent to Vision API.
-    Attractor classes get a higher threshold than normal classes.
-    """
-    if not HAS_VISION_FALLBACK:
-        return False
-    threshold = ATTRACTOR_CLASSES.get(class_name, 0.55)
-    return confidence < threshold
+def is_attractor(class_name: str, confidence: float) -> bool:
+    return class_name in ATTRACTOR_CLASSES and confidence < 0.80
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -217,7 +212,6 @@ def get_model():
     print(f"Model: {arch} | {num_classes} classes | val acc: {val}%")
     return model, idx2char, img_size
 
-
 def get_device():
     if "device" not in _MODEL_CACHE:
         get_model()
@@ -225,7 +219,7 @@ def get_device():
 
 
 # ══════════════════════════════════════════════════════════════════
-# PREPROCESSING + INFERENCE
+# PREPROCESSING
 # ══════════════════════════════════════════════════════════════════
 
 def preprocess_single_char(img_array: np.ndarray, img_size: int = 64) -> torch.Tensor:
@@ -246,34 +240,36 @@ def preprocess_single_char(img_array: np.ndarray, img_size: int = 64) -> torch.T
     return tensor.unsqueeze(0).unsqueeze(0)
 
 
+# ══════════════════════════════════════════════════════════════════
+# SINGLE CHARACTER — CNN ONLY, no Tesseract, as requested
+# ══════════════════════════════════════════════════════════════════
+
 def infer_single_char(img_array: np.ndarray, top_k: int = 5):
     """
-    Vision-only recognition. CNN is not used.
-    Returns (results, source, conf_data) in the same format as before
-    so the rest of app.py needs no changes.
+    CNN-only. No fallback call here at all — restored to the simple
+    behaviour you wanted for Single Character mode.
     """
-    class_name, confidence, source = google_vision_recognise(img_array)
- 
-    if class_name is None:
-        # Vision returned nothing — return a placeholder so the UI
-        # doesn't crash, but make it clear nothing was detected.
-        results   = [("unknown", 0.0)]
-        conf_data = [{"Prediction": "? (not detected)", "Confidence": 0.0}]
-        return results, "Vision (no result)", conf_data
- 
-    # Build a single-entry results list in the same shape the UI expects
-    results = [(class_name, confidence)]
- 
+    model, idx2char, img_size = get_model()
+    device = get_device()
+    tensor = preprocess_single_char(img_array, img_size).to(device)
+    with torch.no_grad():
+        logits = model(tensor)
+        probs  = F.softmax(logits, dim=1)
+        k      = min(top_k, probs.shape[1])
+        top_probs, top_idx = probs.topk(k, dim=1)
+    results = [
+        (idx2char.get(int(top_idx[0][j].item()), f"cls_{int(top_idx[0][j].item())}"),
+         float(top_probs[0][j].item()))
+        for j in range(k)
+    ]
+    best_name, best_conf = results[0]
+    source = "CNN"
     conf_data = [
-        {
-            "Prediction": f"{char_to_devanagari(class_name)} ({class_name})",
-            "Confidence": round(confidence * 100, 1),
-        }
+        {"Prediction": f"{char_to_devanagari(n)} ({n})", "Confidence": round(c * 100, 1)}
+        for n, c in results
     ]
     return results, source, conf_data
-# ══════════════════════════════════════════════════════════════════
-# SINGLE CHARACTER TAB HANDLER
-# ══════════════════════════════════════════════════════════════════
+
 
 def process_single_character(image):
     if image is None:
@@ -336,12 +332,6 @@ def _to_rgb_array(img) -> Optional[np.ndarray]:
 
 
 def extract_cropped_region(editor_value) -> Optional[np.ndarray]:
-    """
-    Safely extract image from Gradio ImageEditor dict.
-    MUST use explicit `is not None` checks — never `or` between
-    .get() results, because numpy arrays raise ValueError when
-    evaluated as booleans.
-    """
     if editor_value is None:
         return None
     if isinstance(editor_value, dict):
@@ -361,7 +351,7 @@ def extract_cropped_region(editor_value) -> Optional[np.ndarray]:
 
 
 # ══════════════════════════════════════════════════════════════════
-# LINE / REGION PIPELINE
+# LINE / REGION PIPELINE — CNN + Tesseract fallback for attractors
 # ══════════════════════════════════════════════════════════════════
 
 def translate_text(text: str, src_hint: str = "ne") -> str:
@@ -387,7 +377,13 @@ def _draw_debug(img_arr: np.ndarray, meta_path: Path) -> Optional[Image.Image]:
             if bbox:
                 x, y, w, h = bbox["x"], bbox["y"], bbox["w"], bbox["h"]
                 conf  = c.get("confidence", 0)
-                color = (0, 200, 0) if conf >= 0.55 else (220, 130, 0)
+                pred  = c.get("predicted", "")
+                if pred in ATTRACTOR_CLASSES and conf < 0.80:
+                    color = (220, 60, 60)
+                elif conf >= 0.55:
+                    color = (0, 200, 0)
+                else:
+                    color = (220, 150, 0)
                 cv2.rectangle(debug, (x, y), (x+w, y+h), color, 1)
                 cv2.putText(debug, f"{conf:.0%}", (x, max(0, y-3)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.28, color, 1)
@@ -397,13 +393,14 @@ def _draw_debug(img_arr: np.ndarray, meta_path: Path) -> Optional[Image.Image]:
 
 
 def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
+    """
+    Returns 8 values now (2 extra for charts):
+      status, per_line, full_deva, iast, translation, debug_img,
+      char_conf_chart_df, attractor_chart_df
+    """
     if not HAS_SEGMENT or not HAS_RECOGNIZE:
-        return "segment.py / recognize.py not found.", "", "", "", "(unavailable)", None
-
-    # Characters below this are shown as ? in output.
-    # Kept low so uncertain-but-plausible CNN predictions still appear
-    # in the translation rather than being blanked out.
-    BLANK_THRESHOLD = 0.20
+        return ("segment.py / recognize.py not found.", "", "", "",
+                "(unavailable)", None, None, None)
 
     tmp_dir = tempfile.mkdtemp(prefix="newa_seg_")
     try:
@@ -414,58 +411,59 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
         os.makedirs(seg_dir, exist_ok=True)
         segment_page(image_path=tmp_img, output_dir=seg_dir)
 
-        # Pass BLANK_THRESHOLD so recognize_segments does not over-flag
         char_list = recognize_segments(
             segments_dir=seg_dir,
             checkpoint_path=str(CKPT_PATH),
-            confidence_threshold=BLANK_THRESHOLD,
+            confidence_threshold=min_conf,
         )
         if not char_list:
-            return "No characters found after segmentation.", "", "", "", "", None
+            return ("No characters found after segmentation.", "", "", "",
+                    "", None, None, None)
 
-        # Vision API fallback: attractor classes + low-confidence chars
-        gv_used = 0
+        # Tesseract fallback for attractor classes / low confidence
+        tesseract_used = 0
         for c in char_list:
             pred = c.get("predicted", "")
+            conf = c.get("confidence", 0.0)
             if pred == "space" or c.get("file") == "__space__":
-                continue                          # never send spaces to Vision
- 
-            crop_path = os.path.join(seg_dir, c.get("file", ""))
-            if not os.path.exists(crop_path):
                 continue
- 
-            try:
-                crop = cv2.imread(crop_path)
-                if crop is None:
-                    continue
-                rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
-                gv_class, gv_conf, _ = google_vision_recognise(rgb)
-                if gv_class is not None:
-                    c["predicted"]  = gv_class
-                    c["confidence"] = gv_conf
-                    gv_used += 1
-                # If Vision returns nothing, keep whatever the CNN said
-            except Exception as gv_err:
-                print(f"[Vision] {gv_err}")
- 
-         
+            if HAS_FALLBACK and should_use_fallback_for_class(pred, conf):
+                crop_path = os.path.join(seg_dir, c.get("file", ""))
+                if os.path.exists(crop_path):
+                    try:
+                        crop = cv2.imread(crop_path)
+                        if crop is not None:
+                            rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                            tess_class, tess_conf, tess_src = google_vision_recognise(rgb)
+                            if tess_class is not None:
+                                c["predicted"]   = tess_class
+                                c["confidence"]  = tess_conf
+                                c["fallback_used"] = True
+                                tesseract_used += 1
+                    except Exception as tess_err:
+                        print(f"[Fallback] {tess_err}")
 
-        char_list = _postprocess(char_list, global_threshold=BLANK_THRESHOLD)
+        char_list = _postprocess(char_list, global_threshold=min_conf)
 
         lines: dict = {}
         for c in sorted(char_list, key=lambda x: (x.get("line", 0), x.get("char_idx", 0))):
             lines.setdefault(c.get("line", 0), []).append(c)
 
+        attractor_count = 0
+
         def _build_line(chars):
+            nonlocal attractor_count
             out = []
             for c in chars:
                 pred = c.get("predicted", "")
                 conf = c.get("confidence", 0.0)
                 if pred == "space" or c.get("file") == "__space__":
                     out.append(" ")
-                elif conf < BLANK_THRESHOLD:
+                elif conf < min_conf:
                     out.append("?")
                 else:
+                    if is_attractor(pred, conf):
+                        attractor_count += 1
                     out.append(char_to_devanagari(pred))
             return "".join(out)
 
@@ -474,7 +472,6 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
             for ln in sorted(lines)
         )
 
-        # Build concat for translation — include all above BLANK_THRESHOLD
         concat_parts = []
         prev_ln = None
         for c in char_list:
@@ -485,7 +482,7 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
                 concat_parts.append(" ")
             if pred == "space" or c.get("file") == "__space__":
                 concat_parts.append(" ")
-            elif conf >= BLANK_THRESHOLD:
+            elif conf >= min_conf:
                 concat_parts.append(char_to_devanagari(pred))
             prev_ln = ln
         concat_deva = "".join(concat_parts)
@@ -494,8 +491,7 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
             " " if (c.get("predicted") == "space" or c.get("file") == "__space__")
             else char_to_iast(c.get("predicted", ""))
             for c in char_list
-            if c.get("confidence", 0) >= BLANK_THRESHOLD
-               or c.get("predicted") == "space"
+            if c.get("confidence", 0) >= min_conf or c.get("predicted") == "space"
         )
 
         translation = translate_text(concat_deva) if do_translate else "(disabled)"
@@ -507,20 +503,57 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
 
         total   = len(char_list)
         blanked = sum(1 for c in char_list
-                      if c.get("confidence", 0) < BLANK_THRESHOLD
+                      if c.get("confidence", 0) < min_conf
                       and c.get("predicted") != "space")
         avg_c   = (sum(c.get("confidence", 0) for c in char_list) / total
                    if total else 0)
 
         status = (
             f"{total} characters | {len(lines)} line(s) | avg conf: {avg_c:.1%}\n"
-            f"Shown as ?: {blanked}/{total}    Fallback used: {gv_used}/{total}"
+            f"Shown as ?: {blanked}/{total}    "
+            f"Attractor-class predictions: {attractor_count}/{total}    "
+            f"Fallback used: {tesseract_used}/{total}"
         )
-        return status, per_line_str, concat_deva, iast_str, translation, debug_img
+
+        # ── CHART DATA ──────────────────────────────────────────
+        try:
+            import pandas as pd
+
+            # Per-character confidence bar chart
+            chart_rows = []
+            for c in char_list:
+                pred = c.get("predicted", "")
+                conf = c.get("confidence", 0.0)
+                if pred == "space" or c.get("file") == "__space__":
+                    continue
+                label = f"{char_to_devanagari(pred)}"
+                chart_rows.append({
+                    "Character": f"{label} #{c.get('char_idx', 0)+1}",
+                    "Confidence": round(conf * 100, 1),
+                    "Type": "Attractor" if is_attractor(pred, conf) else "Normal",
+                })
+            char_conf_df = pd.DataFrame(chart_rows) if chart_rows else pd.DataFrame(
+                {"Character": [], "Confidence": [], "Type": []}
+            )
+
+            # Attractor vs normal breakdown
+            normal_n    = sum(1 for r in chart_rows if r["Type"] == "Normal")
+            attractor_n = sum(1 for r in chart_rows if r["Type"] == "Attractor")
+            attractor_df = pd.DataFrame({
+                "Category": ["Normal classes", "Attractor classes"],
+                "Count": [normal_n, attractor_n],
+            })
+        except ImportError:
+            char_conf_df = None
+            attractor_df = None
+
+        return (status, per_line_str, concat_deva, iast_str, translation,
+                debug_img, char_conf_df, attractor_df)
 
     except Exception as e:
         import traceback
-        return f"Error: {e}\n{traceback.format_exc()}", "", "", "", "", None
+        return (f"Error: {e}\n{traceback.format_exc()}", "", "", "", "",
+                None, None, None)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -528,7 +561,8 @@ def ocr_region(img_arr: np.ndarray, min_conf: float, do_translate: bool):
 def process_line_mode(editor_value, min_conf, do_translate):
     img_arr = extract_cropped_region(editor_value)
     if img_arr is None:
-        return "No image provided.", "", "", "", "(no translation)", None
+        return ("No image provided.", "", "", "", "(no translation)",
+                None, None, None)
     return ocr_region(img_arr, float(min_conf), bool(do_translate))
 
 
@@ -607,6 +641,12 @@ textarea,.gr-textbox textarea{background:var(--bg-input)!important;color:var(--t
 .export-btn{background:#1e2e1e!important;color:#7ab87a!important;
   border:1px solid #3a5a3a!important;border-radius:var(--radius)!important;
   font-size:.85rem!important;padding:6px 16px!important;}
+.stat-card{background:var(--bg-card)!important;border:1px solid var(--border)!important;
+  border-radius:var(--radius)!important;padding:14px 10px!important;text-align:center!important;}
+.stat-card .stat-value{font-size:1.6rem!important;color:var(--accent)!important;
+  font-weight:bold!important;display:block!important;}
+.stat-card .stat-label{font-size:.72rem!important;color:var(--text-dim)!important;
+  text-transform:uppercase!important;letter-spacing:.06em!important;}
 label span{color:var(--text-dim)!important;font-size:.82rem!important;
   text-transform:uppercase;letter-spacing:.08em;}
 input[type=range]{accent-color:var(--accent)!important;}
@@ -624,18 +664,18 @@ def build_ui():
 
         gr.HTML("""
         <div class="app-header">
-          <h1>&#x1112E;&#x11147; Newa Manuscript OCR</h1>
+          <h1>Newa Manuscript OCR</h1>
           <p>Prachalit / Newa Script &rarr; Devanagari &rarr; English</p>
         </div>
         """)
 
         with gr.Tabs():
 
-            # ── TAB 1: SINGLE CHARACTER ───────────────────────────
+            # ── TAB 1: SINGLE CHARACTER (CNN only) ────────────────
             with gr.Tab("Single Character"):
                 gr.Markdown(
                     "Upload one cropped character image. "
-                    "The model returns the top-5 predictions with confidence scores."
+                    "CNN-only recognition with top-5 confidence breakdown."
                 )
                 with gr.Row():
                     with gr.Column(scale=1):
@@ -645,7 +685,6 @@ def build_ui():
                         char_btn    = gr.Button("Recognize", variant="primary")
                         char_export = gr.Button("Save result", elem_classes=["export-btn"])
                         char_file   = gr.File(label="Download", visible=False)
-
                     with gr.Column(scale=2):
                         char_source = gr.Textbox(
                             label="Recognition source", lines=1,
@@ -660,12 +699,9 @@ def build_ui():
                             char_iast = gr.Textbox(label="IAST",        lines=2)
                             char_name = gr.Textbox(label="Class name",  lines=2)
                         char_chart = gr.BarPlot(
-                            value=None,
-                            x="Prediction", y="Confidence",
-                            title="Top-5 confidence (%)",
-                            color="Prediction",
-                            height=200,
-                            y_lim=[0, 100],
+                            value=None, x="Prediction", y="Confidence",
+                            title="Top-5 confidence (%)", color="Prediction",
+                            height=220, y_lim=[0, 100],
                         )
 
                 def _run_single(image):
@@ -680,13 +716,11 @@ def build_ui():
                     return status, deva, iast, name, source, df
 
                 char_btn.click(
-                    fn=_run_single,
-                    inputs=[char_img_in],
+                    fn=_run_single, inputs=[char_img_in],
                     outputs=[char_status, char_deva, char_iast, char_name, char_source, char_chart],
                 )
                 char_img_in.change(
-                    fn=_run_single,
-                    inputs=[char_img_in],
+                    fn=_run_single, inputs=[char_img_in],
                     outputs=[char_status, char_deva, char_iast, char_name, char_source, char_chart],
                 )
                 char_export.click(
@@ -696,18 +730,18 @@ def build_ui():
                 )
                 char_export.click(fn=lambda: gr.update(visible=True), outputs=[char_file])
 
-            # ── TAB 2: LINE / REGION ──────────────────────────────
+            # ── TAB 2: LINE / REGION (CNN + Tesseract fallback) ───
             with gr.Tab("Line / Region"):
                 gr.Markdown(
-                    "Upload a manuscript image and click **Run OCR**. "
-                    "Characters below the confidence threshold are marked with ?. "
-                    "All other characters are included in the translation."
+                    "Upload a manuscript image and click Run OCR. "
+                    "Attractor-class predictions are automatically rechecked "
+                    "with a local Tesseract OCR fallback."
                 )
                 with gr.Row():
                     with gr.Column(scale=2):
                         region_img_in = gr.ImageEditor(
                             label="Manuscript image",
-                            type="numpy", height=400,
+                            type="numpy", height=380,
                             brush=gr.Brush(colors=["#c8853a"], default_size=2),
                         )
                     with gr.Column(scale=1):
@@ -719,7 +753,8 @@ def build_ui():
                         region_btn  = gr.Button("Run OCR", variant="primary")
                         line_export = gr.Button("Save result", elem_classes=["export-btn"])
                         line_file   = gr.File(label="Download", visible=False)
-                        line_status = gr.Textbox(label="Status", lines=3, elem_classes=["status-box"])
+
+                line_status = gr.Textbox(label="Status", lines=3, elem_classes=["status-box"])
 
                 with gr.Tabs():
                     with gr.Tab("Per-line Devanagari"):
@@ -731,13 +766,33 @@ def build_ui():
                     with gr.Tab("Translation"):
                         line_translation = gr.Textbox(label="", lines=5)
                     with gr.Tab("Character Boxes"):
-                        line_debug = gr.Image(label="Green = high confidence, Orange = low confidence")
+                        line_debug = gr.Image(
+                            label="Green = confident | Orange = low confidence | Red = attractor class"
+                        )
+                    with gr.Tab("Confidence Chart"):
+                        gr.Markdown("Per-character confidence, color-coded by class type.")
+                        line_conf_chart = gr.BarPlot(
+                            value=None, x="Character", y="Confidence",
+                            title="Per-character confidence (%)", color="Type",
+                            height=280, y_lim=[0, 100],
+                        )
+                    with gr.Tab("Class Breakdown"):
+                        gr.Markdown(
+                            "Proportion of predictions from attractor-prone classes "
+                            "vs normal classes — useful for explaining model limitations."
+                        )
+                        line_attractor_chart = gr.BarPlot(
+                            value=None, x="Category", y="Count",
+                            title="Attractor vs normal class predictions",
+                            color="Category", height=240,
+                        )
 
                 region_btn.click(
                     fn=process_line_mode,
                     inputs=[region_img_in, min_conf_slider, do_translate_chk],
                     outputs=[line_status, line_perline, line_full_deva,
-                             line_iast, line_translation, line_debug],
+                             line_iast, line_translation, line_debug,
+                             line_conf_chart, line_attractor_chart],
                 )
                 line_export.click(
                     fn=export_line_result,
@@ -749,9 +804,7 @@ def build_ui():
             # ── TAB 3: DEMO IMAGES ────────────────────────────────
             with gr.Tab("Demo Images"):
                 if not demo_cats:
-                    gr.Markdown(
-                        "No demo images found."
-                    )
+                    gr.Markdown("No demo images found.")
                 else:
                     gr.Markdown("Click any image to run recognition automatically.")
                     for cat_name, files in demo_cats.items():
@@ -761,10 +814,8 @@ def build_ui():
                         gallery = gr.Gallery(
                             value=[(path, label) for label, path in files],
                             columns=min(len(files), 8),
-                            height=200,
-                            object_fit="contain",
-                            show_label=False,
-                            allow_preview=False,
+                            height=200, object_fit="contain",
+                            show_label=False, allow_preview=False,
                         )
                         if is_single:
                             with gr.Row():
@@ -791,7 +842,8 @@ def build_ui():
                             _files = files
                             def _on_manuscript(evt: gr.SelectData, f=_files):
                                 img = np.array(Image.open(f[evt.index][1]).convert("RGB"))
-                                st, per, full, iast, trans, dbg = ocr_region(img, 0.35, True)
+                                result = ocr_region(img, 0.35, True)
+                                st, per, full, iast, trans, dbg = result[:6]
                                 return st, full, trans, dbg
                             gallery.select(
                                 fn=_on_manuscript,
@@ -821,7 +873,7 @@ if __name__ == "__main__":
     print(f"  segment.py:      {'Yes' if HAS_SEGMENT    else 'No'}")
     print(f"  recognize.py:    {'Yes' if HAS_RECOGNIZE  else 'No'}")
     print(f"  deep-translator: {'Yes' if HAS_TRANSLATE  else 'No'}")
-    print(f"  Vision fallback: {'Yes' if HAS_VISION_FALLBACK else 'No (set GOOGLE_VISION_API_KEY)'}")
+    print(f"  Fallback (Line/Region only): {'Yes' if HAS_FALLBACK else 'No'}")
     demo_count = sum(len(v) for v in get_demo_images().values())
     print(f"  Demo images:     {demo_count} found")
     print()

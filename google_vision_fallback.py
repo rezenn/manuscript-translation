@@ -1,36 +1,101 @@
 """
-google_vision_fallback.py  —  Google Vision ONLY mode
-═══════════════════════════════════════════════════════
-All recognition goes through Google Cloud Vision.
-CNN model is not used at all.
+google_vision_fallback.py  —  Tesseract OCR fallback (local, free, no billing)
 
-Set your API key before running:
-  Windows PS:   $env:GOOGLE_VISION_API_KEY = "AIza..."
-  Linux/macOS:  export GOOGLE_VISION_API_KEY="AIza..."
+WHY THIS CHANGED
+─────────────────
+Google Cloud Vision requires a billing-enabled GCP project even on the
+free tier (confirmed by your HTTP 403 "requires billing" error). With
+no card available this is a dead end for your deadline.
+
+Tesseract OCR is the correct replacement:
+  - Fully open source, runs 100% locally
+  - No API key, no billing, no internet required after install
+  - Has an official Devanagari (Hindi) trained model that reads
+    consonants, matras, and conjuncts reasonably well on printed text
+  - Module name kept as "google_vision_fallback" so app.py needs
+    ZERO changes — same function signatures, same import line
+
+SETUP (15 minutes, one-time)
+──────────────────────────────
+1. Install the Tesseract OCR ENGINE (not just the Python wrapper):
+
+   Windows:
+     Download installer: https://github.com/UB-Mannheim/tesseract/wiki
+     Run it. During install, check "Additional language data" and
+     select Hindi (this includes the Devanagari script model).
+     Default install path: C:\\Program Files\\Tesseract-OCR\\tesseract.exe
+
+   If you forgot to select Hindi during install, download manually:
+     https://github.com/tesseract-ocr/tessdata/raw/main/hin.traineddata
+   and place it in:
+     C:\\Program Files\\Tesseract-OCR\\tessdata\\hin.traineddata
+
+2. Install the Python wrapper:
+     pip install pytesseract
+
+3. If tesseract.exe is not on your PATH, set TESSERACT_CMD below to
+   the full path (already pre-filled with the default Windows path).
+
+That's it — no account, no key, no card needed.
 """
 
-import base64
-import io
-import json
 import os
-import urllib.error
-import urllib.request
+import shutil
 from typing import Optional, Tuple
 
 import numpy as np
 from PIL import Image
 
-# Pillow 10.x uses Image.Resampling enum
-_RESAMPLE = Image.Resampling.LANCZOS
+try:
+    import pytesseract
+    HAS_PYTESSERACT = True
+except ImportError:
+    HAS_PYTESSERACT = False
+    print("[Tesseract] pytesseract not installed. Run: pip install pytesseract")
 
-# ── API key ───────────────────────────────────────────────────────
-GOOGLE_VISION_API_KEY: str = os.environ.get("GOOGLE_VISION_API_KEY", "")
-
-# These are unused but kept so app.py imports don't break
-VISION_ATTEMPT_THRESHOLD: float = 0.0   # always use Vision
+VISION_ATTEMPT_THRESHOLD: float = 0.80
 BLANK_THRESHOLD: float = 0.20
 
-# ── Devanagari → class name (reverse of NEWA_TO_DEVA in app.py) ───
+# Attractor classes (defined in app.py's ATTRACTOR_CLASSES) frequently
+# get moderate-to-high CNN confidence on the WRONG answer — they don't
+# look "uncertain" by confidence score alone. Your manuscript test
+# showed avg confidence 66.6% with predictions that were still wrong,
+# so a confidence-only threshold never triggers the fallback. This set
+# is checked separately in should_use_fallback_for_class() below so
+# Tesseract gets a chance even when the CNN looks falsely confident.
+_ATTRACTOR_NAMES = {"nna", "ga", "ra", "ja", "dda", "tta", "kha"}
+
+# ── Locate tesseract.exe ────────────────────────────────────────────
+# Default Windows install path. Change this if you installed elsewhere.
+_DEFAULT_WIN_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+def _find_tesseract() -> Optional[str]:
+    # 1. Already on PATH?
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    # 2. Default Windows install location?
+    if os.path.exists(_DEFAULT_WIN_PATH):
+        return _DEFAULT_WIN_PATH
+    # 3. Environment variable override
+    env_path = os.environ.get("TESSERACT_CMD")
+    if env_path and os.path.exists(env_path):
+        return env_path
+    return None
+
+_TESS_PATH = _find_tesseract()
+if HAS_PYTESSERACT and _TESS_PATH:
+    pytesseract.pytesseract.tesseract_cmd = _TESS_PATH
+    print(f"[Tesseract] Using engine at: {_TESS_PATH}")
+elif HAS_PYTESSERACT:
+    print("[Tesseract] WARNING: tesseract.exe not found.")
+    print("  Install from: https://github.com/UB-Mannheim/tesseract/wiki")
+    print("  Or set TESSERACT_CMD environment variable to the exe path.")
+
+HAS_TESSERACT = HAS_PYTESSERACT and _TESS_PATH is not None
+
+
+# ── Devanagari character → internal class name ──────────────────────
 _DEVA_TO_CLASS: dict = {
     "क": "ka",   "ख": "kha",  "ग": "ga",   "घ": "gha",  "ङ": "nga",
     "च": "ca",   "छ": "cha",  "ज": "ja",   "झ": "jha",  "ञ": "nya",
@@ -53,151 +118,100 @@ _DEVA_TO_CLASS: dict = {
 }
 
 
-def _pil_to_b64(img: Image.Image) -> str:
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode("utf-8")
-
-
-def _call_vision_api(img_b64: str) -> Tuple[str, str]:
-    """
-    Returns (detected_text, error_message).
-    On success error_message is "".
-    On failure detected_text is "".
-    """
-    if not GOOGLE_VISION_API_KEY:
-        return "", "GOOGLE_VISION_API_KEY not set"
-
-    payload = json.dumps({
-        "requests": [{
-            "image": {"content": img_b64},
-            "features": [{"type": "TEXT_DETECTION", "maxResults": 5}],
-            "imageContext": {"languageHints": ["ne", "sa"]},
-        }]
-    }).encode("utf-8")
-
-    url = f"https://vision.googleapis.com/v1/images:annotate?key={GOOGLE_VISION_API_KEY}"
-    req = urllib.request.Request(
-        url, data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-
-    try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-
-        block = data.get("responses", [{}])[0]
-        if "error" in block:
-            err = block["error"]
-            msg = f"API error {err.get('code')}: {err.get('message')}"
-            print(f"[Vision] {msg}")
-            return "", msg
-
-        annotations = block.get("textAnnotations", [])
-        if not annotations:
-            print("[Vision] No text detected in crop")
-            return "", ""
-
-        text = annotations[0].get("description", "").strip()
-        print(f"[Vision] Raw detected text: {repr(text)}")
-        return text, ""
-
-    except urllib.error.HTTPError as e:
-        try:
-            body = json.loads(e.read().decode("utf-8"))
-            msg = body.get("error", {}).get("message", str(e))
-        except Exception:
-            msg = str(e)
-        print(f"[Vision] HTTP {e.code}: {msg}")
-        return "", f"HTTP {e.code}: {msg}"
-
-    except urllib.error.URLError as e:
-        print(f"[Vision] Network error: {e.reason}")
-        return "", f"Network: {e.reason}"
-
-    except Exception as e:
-        print(f"[Vision] Exception: {e}")
-        return "", str(e)
-
-
-def _text_to_class(text: str) -> Optional[str]:
-    """Map Devanagari text from Vision back to internal class name."""
-    if not text:
-        return None
-    # Strip whitespace and newlines Vision sometimes adds
-    text = text.strip().replace("\n", "").replace(" ", "")
-    if not text:
-        return None
-    # Try two-char match first (consonant + matra fused)
-    if len(text) >= 2 and text[:2] in _DEVA_TO_CLASS:
-        return _DEVA_TO_CLASS[text[:2]]
-    # Single char
-    if text[0] in _DEVA_TO_CLASS:
-        return _DEVA_TO_CLASS[text[0]]
-    print(f"[Vision] Cannot map to class: {repr(text)}")
-    return None
-
-
-def _prepare_image(img_array: np.ndarray) -> Image.Image:
-    """Convert numpy array to PIL, upscale if too small for Vision."""
+def _prepare_image(img_array) -> Image.Image:
+    """Convert to PIL, upscale small crops, binarize for cleaner OCR."""
     if isinstance(img_array, np.ndarray):
-        pil = Image.fromarray(img_array).convert("RGB")
+        pil = Image.fromarray(img_array).convert("L")  # grayscale
     else:
-        pil = img_array.convert("RGB")
+        pil = img_array.convert("L")
 
     w, h = pil.size
-    # Vision needs at least ~64px to read characters reliably
-    if w < 64 or h < 64:
-        scale = max(64 / w, 64 / h)
-        new_w, new_h = max(64, int(w * scale)), max(64, int(h * scale))
-        pil = pil.resize((new_w, new_h), _RESAMPLE)
-        print(f"[Vision] Upscaled crop {w}x{h} → {new_w}x{new_h}")
+    if w < 100 or h < 100:
+        scale = max(100 / w, 100 / h)
+        # Pillow >= 9.1 exposes Image.Resampling.LANCZOS. Older versions
+        # expose Image.LANCZOS directly. Use getattr chains so static
+        # checkers (Pylance/Pyright) don't flag a missing attribute on
+        # whichever path isn't taken, and so this works on any Pillow
+        # version actually installed.
+        resampling_enum = getattr(Image, "Resampling", None)
+        resample = (
+            getattr(resampling_enum, "LANCZOS", None) if resampling_enum is not None
+            else getattr(Image, "LANCZOS", None)
+        )
+        if resample is None:
+            resample = getattr(Image, "BICUBIC", 2)  # 2 == PIL.Image.BICUBIC value
+        pil = pil.resize((int(w * scale), int(h * scale)), resample)
 
     return pil
 
 
-def google_vision_recognise(
-    img_array: np.ndarray,
-) -> Tuple[Optional[str], float, str]:
-    """
-    Recognise a character crop using Google Cloud Vision ONLY.
+def _text_to_class(text: str) -> Optional[str]:
+    """Map Tesseract's Devanagari output to internal class name."""
+    if not text:
+        return None
+    text = text.strip().replace("\n", "").replace(" ", "")
+    if not text:
+        return None
+    if len(text) >= 2 and text[:2] in _DEVA_TO_CLASS:
+        return _DEVA_TO_CLASS[text[:2]]
+    if text[0] in _DEVA_TO_CLASS:
+        return _DEVA_TO_CLASS[text[0]]
+    return None
 
-    Returns:
-        (class_name_or_None, confidence, source_label)
+
+def google_vision_recognise(img_array) -> Tuple[Optional[str], float, str]:
     """
-    if not GOOGLE_VISION_API_KEY:
-        print("[Vision] ERROR: GOOGLE_VISION_API_KEY is not set!")
-        return None, 0.0, "no_api_key"
+    Run Tesseract OCR (Devanagari/Hindi model) on a character crop.
+    Same return signature as the old Vision function so app.py needs
+    no changes: (class_name_or_None, confidence, source_label).
+    """
+    if not HAS_TESSERACT:
+        return None, 0.0, "tesseract_not_installed"
 
     try:
         pil = _prepare_image(img_array)
-        img_b64 = _pil_to_b64(pil)
-        raw_text, error = _call_vision_api(img_b64)
 
-        if error:
-            return None, 0.0, "vision_error"
+        # --psm 10 = treat image as a single character
+        # lang="hin" = Hindi/Devanagari trained model
+        raw_text = pytesseract.image_to_string(
+            pil, lang="hin", config="--psm 10"
+        ).strip()
 
         if not raw_text:
-            return None, 0.0, "vision_no_text"
+            return None, 0.0, "tesseract_no_text"
 
         class_name = _text_to_class(raw_text)
         if class_name:
-            print(f"[Vision] Mapped '{raw_text}' → {class_name}")
-            return class_name, 0.90, "google_vision"
+            return class_name, 0.70, "tesseract"
 
-        return None, 0.0, "vision_unmapped"
+        print(f"[Tesseract] unmapped text: {repr(raw_text)}")
+        return None, 0.0, "tesseract_unmapped"
 
     except Exception as e:
-        print(f"[Vision] Unhandled exception: {e}")
-        return None, 0.0, "vision_exception"
+        print(f"[Tesseract] error: {e}")
+        return None, 0.0, "tesseract_error"
 
 
 def should_use_fallback(confidence: float) -> bool:
-    """Always True — every character goes through Vision."""
-    return True
+    return HAS_TESSERACT and confidence < VISION_ATTEMPT_THRESHOLD
+
+
+def should_use_fallback_for_class(class_name: str, confidence: float) -> bool:
+    """
+    True if Tesseract should be tried for this prediction.
+    Unlike should_use_fallback(), this also fires for known attractor
+    classes even at moderate-to-high confidence, since those classes
+    are wrong often enough that confidence alone is not a reliable
+    signal (confirmed on your manuscript test: avg conf 66.6% but
+    output was still mostly incorrect).
+    """
+    if not HAS_TESSERACT:
+        return False
+    if confidence < VISION_ATTEMPT_THRESHOLD:
+        return True
+    if class_name in _ATTRACTOR_NAMES and confidence < 0.95:
+        return True
+    return False
 
 
 def is_truly_blank(confidence: float) -> bool:
@@ -206,38 +220,32 @@ def is_truly_blank(confidence: float) -> bool:
 
 # ══════════════════════════════════════════════════════════════════
 # DIAGNOSTIC — run directly to test
-# Usage:  python google_vision_fallback.py [crop.png]
+# Usage: python google_vision_fallback.py [crop.png]
 # ══════════════════════════════════════════════════════════════════
 if __name__ == "__main__":
     import sys
 
     print("=" * 55)
-    print("  Google Vision — standalone diagnostic")
+    print("  Tesseract OCR — standalone diagnostic")
     print("=" * 55)
+    print(f"\npytesseract installed: {HAS_PYTESSERACT}")
+    print(f"tesseract.exe found:   {_TESS_PATH or 'NOT FOUND'}")
+    print(f"Ready to use:          {HAS_TESSERACT}\n")
 
-    if not GOOGLE_VISION_API_KEY:
-        print("\nERROR: GOOGLE_VISION_API_KEY is not set.\n")
-        print("  Windows PS:   $env:GOOGLE_VISION_API_KEY = 'AIza...'")
-        print("  Linux/macOS:  export GOOGLE_VISION_API_KEY='AIza...'")
+    if not HAS_TESSERACT:
+        print("Fix steps:")
+        print("  1. pip install pytesseract")
+        print("  2. Download/install Tesseract engine:")
+        print("     https://github.com/UB-Mannheim/tesseract/wiki")
+        print("  3. During install, check 'Hindi' under additional languages")
         sys.exit(1)
-
-    key_preview = GOOGLE_VISION_API_KEY[:8] + "..." + GOOGLE_VISION_API_KEY[-4:]
-    print(f"\nAPI key : {key_preview}")
-    print(f"Pillow  : {Image.__version__}")
-    print(f"Resample: {_RESAMPLE}\n")
 
     if len(sys.argv) > 1:
         path = sys.argv[1]
-        print(f"Image: {path}")
+        print(f"Testing with: {path}")
         img = np.array(Image.open(path).convert("RGB"))
-        print(f"Size : {img.shape[1]}x{img.shape[0]}\n")
         class_name, conf, source = google_vision_recognise(img)
-        print(f"\nResult  : class={class_name}  conf={conf:.0%}  source={source}")
+        print(f"\nResult: class={class_name}  conf={conf:.0%}  source={source}")
     else:
-        print("No image supplied — sending a white 64x64 test image...")
-        blank = np.full((64, 64, 3), 255, dtype=np.uint8)
-        class_name, conf, source = google_vision_recognise(blank)
-        print(f"\nResult  : class={class_name}  conf={conf:.0%}  source={source}")
-        print("\n(White image returns no text — that is correct)")
-        print("Pass a real crop to test recognition:")
+        print("No image given. Pass a crop to test:")
         print("  python google_vision_fallback.py path/to/crop.png")

@@ -1,0 +1,17 @@
+Newa OCR — Single Character Result
+========================================
+
+Class:      vowel_A
+Devanagari: अ
+IAST:       a
+
+--- Detail ---
+Source: CNN
+Result: अ  [vowel_A]  67.5% (moderate)
+
+Top-5:
+  1. अ (vowel_A)  67.5%  █████████████ <- best
+  2. आ (vowel_AA)  19.7%  ███
+  3. ञ (nya)  4.6%  
+  4. ख (kha)  2.5%  
+  5. झ (jha)  1.8%  
